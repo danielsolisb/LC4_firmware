@@ -1,4 +1,5 @@
 //main.c
+// Autor: Daniel Solis
 #include <xc.h>
 #include "config.h"
 #include "uart.h"
