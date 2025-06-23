@@ -1,0 +1,22 @@
+# Archivos de MPLAB X generados por el build
+dist/
+build/
+
+# Archivos privados y de configuración del usuario
+nbproject/private/
+nbproject/Package-*.bash
+
+# Otros archivos generados y de depuración
+*.o
+*.obj
+*.elf
+*.hex
+*.map
+*.a
+*.d
+*.pre
+*.lst
+
+# Archivos de backup del editor
+*~
+*.bak
