@@ -1,5 +1,6 @@
 //main.c
 // Autor: Daniel Solis
+// fecha 23/06/2025 nuevo commit
 #include <xc.h>
 #include "config.h"
 #include "uart.h"
@@ -9,6 +10,7 @@
 #include "scheduler.h"
 #include "sequence_engine.h"
 
+// principal code
 void main(void) {
     PIC_Init();
 
