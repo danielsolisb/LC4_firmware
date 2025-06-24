@@ -36,9 +36,24 @@ void __interrupt() ISR(void) {
         PIR1bits.TMR1IF = 0; 
     }
     
-    // Manejador de Recepción UART1 (RX)
+    // --- Manejador de Recepción UART1 (RX) ---
     if (PIE1bits.RC1IE && PIR1bits.RC1IF) {
+        
+        // >>> CORRECCIÓN DE ROBUSTEZ: MANEJO DE OVERRUN ERROR (OERR) <<<
+        // Si el bit OERR está activado, significa que se perdió un byte,
+        // usualmente por ruido o alta carga del CPU.
+        if(RCSTA1bits.OERR)
+        {
+            // Para limpiar el error, el datasheet indica que se debe resetear
+            // el receptor de la UART deshabilitando y habilitando el bit CREN.
+            RCSTA1bits.CREN = 0; 
+            RCSTA1bits.CREN = 1; 
+        }
+        
+        // Solo después de verificar el error, leemos el dato de forma segura.
         uint8_t data = RCREG1;
+        
+        // Pasamos el byte recibido a la función de procesamiento en uart.c
         UART_ProcessReceivedByte(data);
     }
 
