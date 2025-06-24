@@ -331,50 +331,50 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         }
         
         case 0x40: {
-    // Payload: [plan_idx(1), tipo_dia(1), sec_idx(1), time_sel(1), hour(1), minute(1)] = 6 bytes
-    if(len != 6) {
-        UART1_SendString("ERROR: Longitud incorrecta para guardar plan\r\n");
-        break;
-    }
-    uint8_t plan_index = buffer[2];
-    uint8_t id_tipo_dia  = buffer[3];
-    uint8_t sec_index   = buffer[4];
-    uint8_t time_sel    = buffer[5];
-    uint8_t hour        = buffer[6];
-    uint8_t minute      = buffer[7];
-    EEPROM_SavePlan(plan_index, id_tipo_dia, sec_index, time_sel, hour, minute);
-    UART1_SendString("Plan guardado correctamente\r\n");
-    //nuevo
-    Scheduler_ForceReevaluation();
-    UART1_SendString("Plan guardado. Reevaluando planes...\r\n");
-    break;
-}
+            // Payload: [plan_idx(1), tipo_dia(1), sec_idx(1), time_sel(1), hour(1), minute(1)] = 6 bytes
+            if(len != 6) {
+                UART1_SendString("ERROR: Longitud incorrecta para guardar plan\r\n");
+                break;
+            }
+            uint8_t plan_index = buffer[2];
+            uint8_t id_tipo_dia  = buffer[3];
+            uint8_t sec_index   = buffer[4];
+            uint8_t time_sel    = buffer[5];
+            uint8_t hour        = buffer[6];
+            uint8_t minute      = buffer[7];
+            EEPROM_SavePlan(plan_index, id_tipo_dia, sec_index, time_sel, hour, minute);
+            UART1_SendString("Plan guardado correctamente\r\n");
+            //nuevo
+            Scheduler_ForceReevaluation();
+            UART1_SendString("Plan guardado. Reevaluando planes...\r\n");
+            break;
+        }
         
         // NUEVA FUNCIONALIDAD: Leer un Plan (CMD 0x41)
         case 0x41: {
-    // Payload esperado: 1 byte: [plan_index]
-    if(len != 1) {
-        UART1_SendString("ERROR: Longitud incorrecta para leer plan\r\n");
-        break;
-    }
-    uint8_t plan_index = buffer[2];
+            // Payload esperado: 1 byte: [plan_index]
+            if(len != 1) {
+                UART1_SendString("ERROR: Longitud incorrecta para leer plan\r\n");
+                break;
+            }
+            uint8_t plan_index = buffer[2];
 
-    // <<< PASO 1: Renombrar 'day' a 'id_tipo_dia' y ajustar el orden
-    uint8_t id_tipo_dia, sec_index, time_sel, hour, minute;
+            // <<< PASO 1: Renombrar 'day' a 'id_tipo_dia' y ajustar el orden
+            uint8_t id_tipo_dia, sec_index, time_sel, hour, minute;
 
-    // <<< PASO 2: Llamar a la función con el orden correcto de argumentos
-    // La firma es: EEPROM_ReadPlan(index, *id_tipo_dia, *sec_index, *time_sel, *hour, *minute)
-    EEPROM_ReadPlan(plan_index, &id_tipo_dia, &sec_index, &time_sel, &hour, &minute);
+            // <<< PASO 2: Llamar a la función con el orden correcto de argumentos
+            // La firma es: EEPROM_ReadPlan(index, *id_tipo_dia, *sec_index, *time_sel, *hour, *minute)
+            EEPROM_ReadPlan(plan_index, &id_tipo_dia, &sec_index, &time_sel, &hour, &minute);
     
-    char msg[100];
+            char msg[100];
 
-    // <<< PASO 3: Actualizar el mensaje para que sea claro y correcto
-    sprintf(msg, "Plan[%d]: TipoDia:%d, Sec:%d, Tsel:%d, Hora:%d, Min:%d\r\n", 
-            plan_index, id_tipo_dia, sec_index, time_sel, hour, minute);
+            // <<< PASO 3: Actualizar el mensaje para que sea claro y correcto
+            sprintf(msg, "Plan[%d]: TipoDia:%d, Sec:%d, Tsel:%d, Hora:%d, Min:%d\r\n", 
+                    plan_index, id_tipo_dia, sec_index, time_sel, hour, minute);
             
-    UART1_SendString(msg);
-    break;
-}
+            UART1_SendString(msg);
+            break;
+        }
         
         case 0x50: { // Guardar Bloque de Intermitencia
             // Payload: slot_index(1) + id_plan(1) + mov_idx(1) + mask_d(1) + mask_e(1) + mask_f(1) = 6 bytes

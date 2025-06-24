@@ -186,3 +186,7 @@ static void Scheduler_UpdateAndExecutePlan(void) {
         Sequence_Engine_EnterFallback(); // Error, no hay configuración
     }
 }
+
+int8_t Scheduler_GetActivePlanID(void) {
+    return g_active_plan_index;
+}

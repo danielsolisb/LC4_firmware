@@ -45,14 +45,31 @@ void main(void) {
         CLRWDT();
         UART_Task();
 
-        if (g_one_second_flag) {
-            Scheduler_Task();
+        // --- NUEVA LÓGICA DE MANEJO DE TIEMPO CENTRALIZADO ---
+        
+        // 1. Leer las banderas una sola vez al inicio del ciclo.
+        bool half_tick = g_half_second_flag;
+        bool sec_tick = g_one_second_flag;
+
+        // 2. Consumir las banderas inmediatamente para no perder ticks.
+        if (half_tick) {
+            g_half_second_flag = false;
+        }
+        if (sec_tick) {
             g_one_second_flag = false;
         }
+        
+        // 3. Ejecutar las tareas pasando las banderas como parámetros.
+        
+        // El Scheduler solo necesita el tick de un segundo.
+        if (sec_tick) {
+            Scheduler_Task();
+        }
 
-        if (g_half_second_flag) {
-            Sequence_Engine_Run();
-            g_half_second_flag = false;
+        // El Motor de Secuencias necesita ambos ticks para funcionar correctamente.
+        // Se llama si ha ocurrido cualquiera de los dos ticks.
+        if (half_tick || sec_tick) {
+            Sequence_Engine_Run(half_tick, sec_tick);
         }
     }
 }

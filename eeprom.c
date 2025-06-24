@@ -200,9 +200,9 @@ void EEPROM_ReadWeeklyAgenda(uint8_t agenda[7]) {
 
 void EEPROM_SaveIntermittence(uint8_t index, uint8_t id_plan, uint8_t indice_mov, uint8_t mask_d, uint8_t mask_e, uint8_t mask_f) {
     if (index >= MAX_INTERMITENCES) return; // Protección contra desbordamiento
-    
+
     uint16_t addr = EEPROM_BASE_INTERMITENCES + (index * INTERMITTENCE_SIZE);
-    
+
     EEPROM_Write(addr,     id_plan);
     EEPROM_Write(addr + 1, indice_mov);
     EEPROM_Write(addr + 2, mask_d);
@@ -211,7 +211,10 @@ void EEPROM_SaveIntermittence(uint8_t index, uint8_t id_plan, uint8_t indice_mov
 }
 
 void EEPROM_ReadIntermittence(uint8_t index, uint8_t *id_plan, uint8_t *indice_mov, uint8_t *mask_d, uint8_t *mask_e, uint8_t *mask_f) {
-    if (index >= MAX_INTERMITENCES) return; // Protección
+    if (index >= MAX_INTERMITENCES) { // Protección
+        *id_plan = 0xFF; // Devuelve un valor inválido si el índice está fuera de rango
+        return;
+    }
 
     uint16_t addr = EEPROM_BASE_INTERMITENCES + (index * INTERMITTENCE_SIZE);
 

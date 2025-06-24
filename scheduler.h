@@ -28,4 +28,6 @@ void Scheduler_Task(void);
  */
 void Scheduler_ForceReevaluation(void);
 
+int8_t Scheduler_GetActivePlanID(void);
+
 #endif // SCHEDULER_H
