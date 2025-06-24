@@ -13,6 +13,8 @@
 #define TIPO_DIA_SABADO 2
 #define TIPO_DIA_DOMINGO 3
 #define TIPO_DIA_FERIADO 4
+#define TIPO_DIA_TODOS 5           // Nuevo: Se aplica a cualquier día.
+#define TIPO_DIA_TODOS_NO_FERIADO 6  // Nuevo: Se aplica a cualquier día que no sea feriado.
 #define EEPROM_BASE_MOVEMENTS 0x020
 #define MOVEMENT_SIZE 10
 #define MAX_MOVEMENTS 60
