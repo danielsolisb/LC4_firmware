@@ -168,17 +168,22 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         // --- Comandos de RTC (requieren bloqueo con semáforo) ---
         case 0x21: { // Consultar Hora
             if(len != 0) { UART1_SendString("ERROR: Longitud invalida para CMD 0x21\r\n"); break; }
+            
             g_rtc_access_in_progress = true; // <<-- BLOQUEAR ACCESO
             
             RTC_Time rtc;
             RTC_GetTime(&rtc);
-            //char msg[64];
-            sprintf(uart_response_buffer, "Hora: %02d:%02d:%02d - Fecha: %02d/%02d/%02d\r\n", rtc.hour, rtc.minute, rtc.second, rtc.day, rtc.month, rtc.year);
+            
+            // Usamos el buffer estático que definimos para evitar problemas de memoria
+            sprintf(uart_response_buffer, "Hora: %02d:%02d:%02d - Fecha: %02d/%02d/%02d (DoW: %d)\r\n", 
+                    rtc.hour, rtc.minute, rtc.second, rtc.day, rtc.month, rtc.year, rtc.dayOfWeek);
+            
             UART1_SendString(uart_response_buffer);
             
             g_rtc_access_in_progress = false; // <<-- LIBERAR ACCESO
             break;
         }
+        
         case 0x22: { // Establecer Hora
             if (len != 7) { UART1_SendString("ERROR: Longitud invalida para CMD 0x22\r\n"); break; }
             g_rtc_access_in_progress = true; // <<-- BLOQUEAR ACCESO
@@ -468,20 +473,7 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
 
-        case 0x62: { // Guardar Agenda Semanal
-            // Payload: [tipo_L, tipo_M, tipo_Mi, tipo_J, tipo_V, tipo_S, tipo_D] = 7 bytes
-            if (len != 7) { /* ... error ... */ break; }
-            uint8_t agenda[7];
-            for(uint8_t i=0; i<7; i++) {
-                agenda[i] = buffer[2+i];
-            }
-            EEPROM_SaveWeeklyAgenda(agenda);
-            UART1_SendString("Agenda semanal guardada\r\n");
-            //nuevo
-            Scheduler_ForceReevaluation();
-            UART1_SendString("Agenda semanal guardada. Reevaluando...\r\n");
-            break;
-        }
+        
         
         
         default:

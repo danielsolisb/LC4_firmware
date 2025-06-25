@@ -184,17 +184,17 @@ void EEPROM_ReadHoliday(uint8_t index, uint8_t *day, uint8_t *month) {
     *month = EEPROM_Read(addr + 1);
 }
 
-void EEPROM_SaveWeeklyAgenda(uint8_t agenda[7]) {
+/*void EEPROM_SaveWeeklyAgenda(uint8_t agenda[7]) {
     for (uint8_t i = 0; i < 7; i++) {
         EEPROM_Write(EEPROM_BASE_WEEKLY_AGENDA + i, agenda[i]);
     }
-}
+}*/
 
-void EEPROM_ReadWeeklyAgenda(uint8_t agenda[7]) {
+/*void EEPROM_ReadWeeklyAgenda(uint8_t agenda[7]) {
     for (uint8_t i = 0; i < 7; i++) {
         agenda[i] = EEPROM_Read(EEPROM_BASE_WEEKLY_AGENDA + i);
     }
-}
+}*/
 
 // --- NUEVAS FUNCIONES PARA LA TABLA DE INTERMITENCIAS ---
 

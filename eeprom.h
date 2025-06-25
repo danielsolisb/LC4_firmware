@@ -30,8 +30,8 @@
 #define EEPROM_BASE_HOLIDAYS 0x3D0
 #define HOLIDAY_SIZE 2
 #define MAX_HOLIDAYS 20
-#define EEPROM_BASE_WEEKLY_AGENDA 0x3F8
-#define WEEKLY_AGENDA_SIZE 7
+//#define EEPROM_BASE_WEEKLY_AGENDA 0x3F8
+//#define WEEKLY_AGENDA_SIZE 7
 
 void EEPROM_Init(void);
 void EEPROM_Write(uint16_t addr, uint8_t data);
@@ -50,7 +50,7 @@ void EEPROM_SaveIntermittence(uint8_t index, uint8_t id_plan, uint8_t indice_mov
 void EEPROM_ReadIntermittence(uint8_t index, uint8_t *id_plan, uint8_t *indice_mov, uint8_t *mask_d, uint8_t *mask_e, uint8_t *mask_f);
 void EEPROM_SaveHoliday(uint8_t index, uint8_t day, uint8_t month);
 void EEPROM_ReadHoliday(uint8_t index, uint8_t *day, uint8_t *month);
-void EEPROM_SaveWeeklyAgenda(uint8_t agenda[7]);
-void EEPROM_ReadWeeklyAgenda(uint8_t agenda[7]);
+//void EEPROM_SaveWeeklyAgenda(uint8_t agenda[7]);
+//void EEPROM_ReadWeeklyAgenda(uint8_t agenda[7]);
 
 #endif // EEPROM_H
