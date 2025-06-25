@@ -88,28 +88,23 @@ static void Scheduler_UpdateAndExecutePlan(void) {
     uint8_t id_tipo_hoy = Scheduler_GetDayType(&now, &is_today_holiday);
     uint16_t current_time_in_minutes = now.hour * 60 + now.minute;
     
-    // --- Paso 2: Búsqueda jerárquica en una sola pasada ---
-    int8_t p1_specific_idx = -1, p2_no_holiday_idx = -1, p3_all_days_idx = -1;
-    uint16_t p1_time = 0, p2_time = 0, p3_time = 0;
-    
-    // Nivel 4: Para la lógica de continuidad, necesitamos encontrar el último plan de ayer.
-    // Lo hacemos aquí mismo para optimizar.
-    int8_t p4_yesterday_idx = -1;
-    uint16_t p4_time = 0;
+    // --- Paso 2: Búsqueda jerárquica para planes de HOY ---
+    int8_t p_today_specific_idx = -1, p_today_no_holiday_idx = -1, p_today_all_days_idx = -1;
+    uint16_t t_today_specific = 0, t_today_no_holiday = 0, t_today_all_days = 0;
+
+    // --- NUEVA LÓGICA MEJORADA para la búsqueda de AYER ---
+    int8_t p_yesterday_specific_idx = -1, p_yesterday_no_holiday_idx = -1, p_yesterday_all_days_idx = -1;
+    uint16_t t_yesterday_specific = 0, t_yesterday_no_holiday = 0, t_yesterday_all_days = 0;
 
     bool any_plan_exists = false;
 
-    // Determinar el tipo de día de ayer
-    bool is_yesterday_holiday; // No la usamos por ahora, pero podría ser útil
-    RTC_Time yesterday = now; // Simplificación: no manejamos cambio de mes/año para feriados de ayer
-    if (yesterday.day > 1) yesterday.day--; else yesterday.day = 31; // Simplificación
-    Scheduler_GetDayType(&yesterday, &is_yesterday_holiday);
+    // Determinar contexto de AYER
+    RTC_Time yesterday_struct = now;
+    // Lógica simple para manejar el día anterior (se puede mejorar para fin de mes/año)
+    if(yesterday_struct.day > 1) yesterday_struct.day--; else yesterday_struct.day = 31;
     
-    uint8_t agenda[7];
-    EEPROM_ReadWeeklyAgenda(agenda);
-    uint8_t yesterday_dow = (now.dayOfWeek == 1) ? 7 : now.dayOfWeek - 1;
-    uint8_t id_tipo_ayer = agenda[yesterday_dow - 1];
-    // TODO: La lógica para determinar si ayer fue feriado puede mejorarse
+    bool is_yesterday_holiday;
+    uint8_t id_tipo_ayer = Scheduler_GetDayType(&yesterday_struct, &is_yesterday_holiday);
 
     for (uint8_t i = 0; i < MAX_PLANS; i++) {
         Plan* p = &g_plan_cache[i];
@@ -118,43 +113,51 @@ static void Scheduler_UpdateAndExecutePlan(void) {
 
         uint16_t plan_time = p->hour * 60 + p->minute;
         
-        // Búsqueda para planes de HOY (Niveles 1, 2, 3)
+        // Búsqueda para planes de HOY (que ya ocurrieron)
         if (plan_time <= current_time_in_minutes) {
-            if (p->id_tipo_dia == id_tipo_hoy) { // Nivel 1
-                if (p1_specific_idx == -1 || plan_time >= p1_time) {
-                    p1_time = plan_time; p1_specific_idx = (int8_t)i;
+            if (p->id_tipo_dia == id_tipo_hoy) { // Nivel 1 (Hoy, Específico)
+                if (p_today_specific_idx == -1 || plan_time >= t_today_specific) {
+                    t_today_specific = plan_time; p_today_specific_idx = (int8_t)i;
                 }
-            } else if (p->id_tipo_dia == TIPO_DIA_TODOS_NO_FERIADO && !is_today_holiday) { // Nivel 2
-                if (p2_no_holiday_idx == -1 || plan_time >= p2_time) {
-                    p2_time = plan_time; p2_no_holiday_idx = (int8_t)i;
+            } else if (p->id_tipo_dia == TIPO_DIA_TODOS_NO_FERIADO && !is_today_holiday) { // Nivel 2 (Hoy, No Feriado)
+                if (p_today_no_holiday_idx == -1 || plan_time >= t_today_no_holiday) {
+                    t_today_no_holiday = plan_time; p_today_no_holiday_idx = (int8_t)i;
                 }
-            } else if (p->id_tipo_dia == TIPO_DIA_TODOS) { // Nivel 3
-                if (p3_all_days_idx == -1 || plan_time >= p3_time) {
-                    p3_time = plan_time; p3_all_days_idx = (int8_t)i;
+            } else if (p->id_tipo_dia == TIPO_DIA_TODOS) { // Nivel 3 (Hoy, Todos)
+                if (p_today_all_days_idx == -1 || plan_time >= t_today_all_days) {
+                    t_today_all_days = plan_time; p_today_all_days_idx = (int8_t)i;
                 }
             }
         }
         
-        // Búsqueda para plan de AYER (Nivel 4)
-        if (p->id_tipo_dia == id_tipo_ayer) {
-            if (p4_yesterday_idx == -1 || plan_time >= p4_time) {
-                p4_time = plan_time; p4_yesterday_idx = (int8_t)i;
+        // Búsqueda para el plan más tardío de AYER (para continuidad)
+        if (p->id_tipo_dia == id_tipo_ayer) { // Nivel 4.1 (Ayer, Específico)
+            if (p_yesterday_specific_idx == -1 || plan_time >= t_yesterday_specific) {
+                t_yesterday_specific = plan_time; p_yesterday_specific_idx = i;
+            }
+        } else if (p->id_tipo_dia == TIPO_DIA_TODOS_NO_FERIADO && !is_yesterday_holiday) { // Nivel 4.2 (Ayer, No Feriado)
+            if (p_yesterday_no_holiday_idx == -1 || plan_time >= t_yesterday_no_holiday) {
+                t_yesterday_no_holiday = plan_time; p_yesterday_no_holiday_idx = i;
+            }
+        } else if (p->id_tipo_dia == TIPO_DIA_TODOS) { // Nivel 4.3 (Ayer, Todos)
+             if (p_yesterday_all_days_idx == -1 || plan_time >= t_yesterday_all_days) {
+                t_yesterday_all_days = plan_time; p_yesterday_all_days_idx = i;
             }
         }
     }
 
     // --- Paso 3: Lógica de Decisión Final ---
     int8_t new_plan_index = -1;
-    if (p1_specific_idx != -1) {
-        new_plan_index = p1_specific_idx;
-    } else if (p2_no_holiday_idx != -1) {
-        new_plan_index = p2_no_holiday_idx;
-    } else if (p3_all_days_idx != -1) {
-        new_plan_index = p3_all_days_idx;
-    } else {
-        // Nivel 4: Lógica de continuidad (último plan de ayer)
-        // Si ninguna de las reglas anteriores aplica, usamos el mejor candidato de ayer.
-        new_plan_index = p4_yesterday_idx;
+
+    // Prioridad para HOY
+    if (p_today_specific_idx != -1) new_plan_index = p_today_specific_idx;
+    else if (p_today_no_holiday_idx != -1) new_plan_index = p_today_no_holiday_idx;
+    else if (p_today_all_days_idx != -1) new_plan_index = p_today_all_days_idx;
+    else {
+        // Si no hay plan para hoy, buscamos el mejor de AYER para continuidad
+        if (p_yesterday_specific_idx != -1) new_plan_index = p_yesterday_specific_idx;
+        else if (p_yesterday_no_holiday_idx != -1) new_plan_index = p_yesterday_no_holiday_idx;
+        else if (p_yesterday_all_days_idx != -1) new_plan_index = p_yesterday_all_days_idx;
     }
 
     // --- Paso 4: Ejecución Final ---
@@ -166,9 +169,9 @@ static void Scheduler_UpdateAndExecutePlan(void) {
         }
     } else if (any_plan_exists) {
         g_active_plan_index = -1;
-        Sequence_Engine_Stop();
+        Sequence_Engine_Stop(); // Hay planes, pero ninguno aplica
     } else {
         g_active_plan_index = -1;
-        Sequence_Engine_EnterFallback();
+        Sequence_Engine_EnterFallback(); // No hay ningún plan configurado
     }
 }

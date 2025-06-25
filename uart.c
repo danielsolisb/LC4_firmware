@@ -19,6 +19,9 @@ static volatile uint8_t uart_rx_buffer[UART_RX_BUFFER_SIZE];
 static volatile uint8_t uart_rx_index = 0;
 static volatile bool g_frame_received = false;
 
+#define UART_RESPONSE_BUFFER_SIZE 128
+static char uart_response_buffer[UART_RESPONSE_BUFFER_SIZE];
+
 static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length);
 
 // >>> NUEVO CERROJO (LOCK) POR SOFTWARE <<<
@@ -154,9 +157,9 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         case 0x11: { // Leer ID de controlador
             if(len != 0) { UART1_SendString("ERROR: Longitud invalida para CMD 0x11\r\n"); break; }
             uint8_t id = EEPROM_ReadControllerID();
-            char msg[64];
-            sprintf(msg, "ID del controlador: %02X\r\n", id);
-            UART1_SendString(msg);
+            //char msg[64];
+            sprintf(uart_response_buffer, "ID del controlador: %02X\r\n", id);
+            UART1_SendString(uart_response_buffer);
             break;
         }
         // ... Aquí irían todos tus otros case para EEPROM: 0x23, 0x24, 0x30, etc. ...
@@ -169,9 +172,9 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             
             RTC_Time rtc;
             RTC_GetTime(&rtc);
-            char msg[64];
-            sprintf(msg, "Hora: %02d:%02d:%02d - Fecha: %02d/%02d/%02d\r\n", rtc.hour, rtc.minute, rtc.second, rtc.day, rtc.month, rtc.year);
-            UART1_SendString(msg);
+            //char msg[64];
+            sprintf(uart_response_buffer, "Hora: %02d:%02d:%02d - Fecha: %02d/%02d/%02d\r\n", rtc.hour, rtc.minute, rtc.second, rtc.day, rtc.month, rtc.year);
+            UART1_SendString(uart_response_buffer);
             
             g_rtc_access_in_progress = false; // <<-- LIBERAR ACCESO
             break;
@@ -238,11 +241,11 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
                 UART1_SendString("Movimiento no existe o esta vacio\r\n");
             } else {
                 // La cadena de respuesta ya estaba correcta, se mantiene igual
-                char msg[120]; 
-                sprintf(msg, "Movimiento[%d]: D:%02X E:%02X F:%02X H:%02X J:%02X T:[%02X %02X %02X %02X %02X]\r\n",
+                //char msg[120]; 
+                sprintf(uart_response_buffer, "Movimiento[%d]: D:%02X E:%02X F:%02X H:%02X J:%02X T:[%02X %02X %02X %02X %02X]\r\n",
                         index, portD, portE, portF, portH, portJ,
                         times[0], times[1], times[2], times[3], times[4]);
-                UART1_SendString(msg);
+                UART1_SendString(uart_response_buffer);
             }
             break;
         }
@@ -318,12 +321,12 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             if(num_movements == 0){
                 UART1_SendString("Secuencia no existe o esta vacia\r\n");
             } else {
-                char msg[80];
-                sprintf(msg, "Secuencia[%d]: Movimientos: ", sec_index); // Mensaje cambiado
-                UART1_SendString(msg);
+                //char msg[80];
+                sprintf(uart_response_buffer, "Secuencia[%d]: Movimientos: ", sec_index); // Mensaje cambiado
+                UART1_SendString(uart_response_buffer);
                 for(uint8_t i = 0; i < num_movements; i++){
-                    sprintf(msg, "%d ", movements_indices[i]);
-                    UART1_SendString(msg);
+                    sprintf(uart_response_buffer, "%d ", movements_indices[i]);
+                    UART1_SendString(uart_response_buffer);
                 }
                 UART1_SendString("\r\n");
             }
@@ -366,13 +369,13 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             // La firma es: EEPROM_ReadPlan(index, *id_tipo_dia, *sec_index, *time_sel, *hour, *minute)
             EEPROM_ReadPlan(plan_index, &id_tipo_dia, &sec_index, &time_sel, &hour, &minute);
     
-            char msg[100];
+            //char msg[100];
 
             // <<< PASO 3: Actualizar el mensaje para que sea claro y correcto
-            sprintf(msg, "Plan[%d]: TipoDia:%d, Sec:%d, Tsel:%d, Hora:%d, Min:%d\r\n", 
+            sprintf(uart_response_buffer, "Plan[%d]: TipoDia:%d, Sec:%d, Tsel:%d, Hora:%d, Min:%d\r\n", 
                     plan_index, id_tipo_dia, sec_index, time_sel, hour, minute);
             
-            UART1_SendString(msg);
+            UART1_SendString(uart_response_buffer);
             break;
         }
         
@@ -412,10 +415,10 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             if (id_plan == 0xFF && mov_idx == 0xFF && mask_d == 0xFF) {
                  UART1_SendString("Bloque de intermitencia no existe o esta vacio\r\n");
             } else {
-                char msg[120];
-                sprintf(msg, "Intermitencia[%d]: PlanID:%d MovID:%d MaskD:0x%02X MaskE:0x%02X MaskF:0x%02X\r\n",
+                //char msg[120];
+                sprintf(uart_response_buffer, "Intermitencia[%d]: PlanID:%d MovID:%d MaskD:0x%02X MaskE:0x%02X MaskF:0x%02X\r\n",
                         slot_index, id_plan, mov_idx, mask_d, mask_e, mask_f);
-                UART1_SendString(msg);
+                UART1_SendString(uart_response_buffer);
             }
             break;
         }
@@ -442,15 +445,15 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             
             UART1_SendString("--- Feriados Guardados ---\r\n");
             uint8_t day, month;
-            char msg[32];
+            //char msg[32];
             uint8_t encontrados = 0;
             
             for (uint8_t i = 0; i < MAX_HOLIDAYS; i++) {
                 EEPROM_ReadHoliday(i, &day, &month);
                 // Un slot vacío en la EEPROM usualmente lee 0xFF
                 if (day != 0xFF && month != 0xFF && day <= 31 && month <= 12) {
-                    sprintf(msg, "Slot[%d]: %02d/%02d\r\n", i, day, month);
-                    UART1_SendString(msg);
+                    sprintf(uart_response_buffer, "Slot[%d]: %02d/%02d\r\n", i, day, month);
+                    UART1_SendString(uart_response_buffer);
                     encontrados++;
                 }
             }
@@ -459,8 +462,8 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
                 UART1_SendString("No hay feriados configurados.\r\n");
             }
             
-            sprintf(msg, "Total: %d/%d\r\n", encontrados, MAX_HOLIDAYS);
-            UART1_SendString(msg);
+            sprintf(uart_response_buffer, "Total: %d/%d\r\n", encontrados, MAX_HOLIDAYS);
+            UART1_SendString(uart_response_buffer);
             
             break;
         }

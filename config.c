@@ -28,8 +28,12 @@ void PIC_Init(void){
     TRISD = 0x00; 
     TRISE = 0x00; 
     TRISF = 0x00; 
-    TRISH = 0x00;
-    TRISJ = 0x00; 
+    //TRISH = 0x00;
+    // Configura Puerto H: H7,H6,H5 como entradas (1), el resto como salidas (0)
+    TRISH = 0b11100100;
+    //TRISJ = 0x00; 
+    // Configura Puerto J: J7,J6,J5 como entradas (1), el resto como salidas (0)
+    TRISJ = 0b11100001;
     
     // LEDs de depuración en Puerto A
     TRISAbits.TRISA1 = 0; 
