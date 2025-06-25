@@ -473,7 +473,31 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
 
-        
+        case 0xF0: { // Comando para restaurar a fábrica
+            if (len != 0) {
+                UART1_SendString("ERROR: Comando de restauracion no requiere payload\r\n");
+                break;
+            }
+            
+            UART1_SendString("Restaurando a valores de fabrica...\r\n");
+            
+            // Paso 1: Borra toda la memoria EEPROM.
+            EEPROM_EraseAll();
+            
+            // --- PASO 2 (AÑADIDO): Vuelve a escribir la estructura inicial ---
+            // Esto incluye los valores por defecto del Movimiento 0, la Secuencia 0
+            // y la bandera de inicialización 0xAA.
+            EEPROM_InitStructure();
+            
+            UART1_SendString("Restauracion completada. Reiniciando logica...\r\n");
+            
+            // Paso 3: Fuerza al planificador a re-evaluar su estado.
+            // Ahora encontrará los valores de fábrica y funcionará con ellos.
+            Scheduler_ForceReevaluation();
+            
+            break;
+        }
+
         
         
         default:

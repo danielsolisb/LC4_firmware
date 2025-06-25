@@ -7,6 +7,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Tamaño total de la EEPROM para el PIC18F8720 (1KB)
+#define EEPROM_SIZE 1024
+
 #define VALID_PINS_H 0x1B
 #define VALID_PINS_J 0x1E
 #define TIPO_DIA_LABORAL 1
@@ -36,6 +39,11 @@
 void EEPROM_Init(void);
 void EEPROM_Write(uint16_t addr, uint8_t data);
 uint8_t EEPROM_Read(uint16_t addr);
+/**
+ * @brief Borra toda la memoria EEPROM, escribiendo 0xFF en cada dirección.
+ */
+void EEPROM_EraseAll(void);
+
 void EEPROM_InitStructure(void);
 void EEPROM_SaveControllerID(uint8_t id);
 uint8_t EEPROM_ReadControllerID(void);
