@@ -7,7 +7,10 @@
 #define EEPROM_SECUENCIAS_ADDR  0x200   // Usado en funciones antiguas, ahora se utiliza EEPROM_BASE_SEQUENCES
 #define EEPROM_CONTROLLER_ID_ADDR  0x001 // Dirección para el ID del controlador
 
-// (Usar las macros definidas en eeprom.h para la organización en pasos, secuencias y planes)
+// --- Valores de Fábrica para los Puertos (Todos los rojos) ---
+#define FACTORY_DEFAULT_PORTD 0x92 // R1, R2, R3
+#define FACTORY_DEFAULT_PORTE 0x49 // R4, R5, R6
+#define FACTORY_DEFAULT_PORTF 0x24 // R7, R8
 
 // Funciones básicas de lectura/escritura:
 void EEPROM_Init(void){
@@ -44,7 +47,25 @@ uint8_t EEPROM_Read(uint16_t addr){
 }
 
 void EEPROM_InitStructure(void){
-    // Inicializa la EEPROM marcando la bandera
+    // 1. Definir los valores de fábrica para el Movimiento 0
+    uint8_t default_times[5] = {1, 2, 3, 4, 5};
+    // Los puertos peatonales H y J se dejan vacíos (0x00)
+    EEPROM_SaveMovement(0, 
+                        FACTORY_DEFAULT_PORTD, 
+                        FACTORY_DEFAULT_PORTE, 
+                        FACTORY_DEFAULT_PORTF, 
+                        0x00, 
+                        0x00, 
+                        default_times);
+
+    // 2. Definir los valores de fábrica para la Secuencia 0
+    // La secuencia contiene 1 movimiento: el índice 0.
+    // El resto del array se rellena con 0xFF como es estándar.
+    uint8_t default_sequence_indices[12] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    EEPROM_SaveSequence(0, 1, default_sequence_indices);
+    
+    // 3. Escribir la bandera de inicialización al final para marcar el proceso como completado.
+    // Esto asegura que esta función no se vuelva a ejecutar en reinicios posteriores.
     EEPROM_Write(0x000, 0xAA);
 }
 
@@ -55,6 +76,19 @@ void EEPROM_SaveControllerID(uint8_t id) {
 
 uint8_t EEPROM_ReadControllerID(void) {
     return EEPROM_Read(0x001);
+}
+
+/**
+ * @brief Escribe 0xFF en toda la memoria EEPROM desde la dirección 0x000
+ * hasta el final (EEPROM_SIZE - 1).
+ * @details Este proceso puede tomar un momento en completarse.
+ */
+void EEPROM_EraseAll(void) {
+    // Recorremos cada una de las direcciones de la memoria EEPROM
+    for (uint16_t i = 0; i < EEPROM_SIZE; i++) {
+        // Escribimos el valor 0xFF, que representa un byte borrado.
+        EEPROM_Write(i, 0xFF);
+    }
 }
 
 // --- Tabla de Pasos ---
@@ -184,17 +218,6 @@ void EEPROM_ReadHoliday(uint8_t index, uint8_t *day, uint8_t *month) {
     *month = EEPROM_Read(addr + 1);
 }
 
-/*void EEPROM_SaveWeeklyAgenda(uint8_t agenda[7]) {
-    for (uint8_t i = 0; i < 7; i++) {
-        EEPROM_Write(EEPROM_BASE_WEEKLY_AGENDA + i, agenda[i]);
-    }
-}*/
-
-/*void EEPROM_ReadWeeklyAgenda(uint8_t agenda[7]) {
-    for (uint8_t i = 0; i < 7; i++) {
-        agenda[i] = EEPROM_Read(EEPROM_BASE_WEEKLY_AGENDA + i);
-    }
-}*/
 
 // --- NUEVAS FUNCIONES PARA LA TABLA DE INTERMITENCIAS ---
 
