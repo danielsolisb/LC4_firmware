@@ -26,7 +26,7 @@ void Scheduler_Task(void);
  * @details Debe llamarse después de que la GUI guarda un nuevo plan,
  * una nueva agenda semanal o nuevos feriados.
  */
-void Scheduler_ForceReevaluation(void);
+void Scheduler_ReloadCache(void);
 
 int8_t Scheduler_GetActivePlanID(void);
 

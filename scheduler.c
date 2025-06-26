@@ -44,9 +44,10 @@ void Scheduler_Init(void) {
     Scheduler_UpdateAndExecutePlan();
 }
 
-void Scheduler_ForceReevaluation(void) {
+void Scheduler_ReloadCache(void) { // <-- ANTES: Scheduler_ForceReevaluation
+    // Ahora, esta función solo recarga los planes a la memoria RAM.
+    // NO fuerza una re-evaluación inmediata del plan activo.
     Scheduler_LoadPlansToCache();
-    Scheduler_UpdateAndExecutePlan();
 }
 
 void Scheduler_Task(void) {

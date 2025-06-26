@@ -30,7 +30,9 @@ void EEPROM_Write(uint16_t addr, uint8_t data){
     EECON2 = 0xAA;
     EECON1bits.WR = 1;
 
-    while(EECON1bits.WR);
+    while(EECON1bits.WR) {
+        CLRWDT();
+    }
 
     EECON1bits.WREN = 0;
     INTCONbits.GIE = 1;
@@ -49,7 +51,6 @@ uint8_t EEPROM_Read(uint16_t addr){
 void EEPROM_InitStructure(void){
     // 1. Definir los valores de fábrica para el Movimiento 0
     uint8_t default_times[5] = {1, 2, 3, 4, 5};
-    // Los puertos peatonales H y J se dejan vacíos (0x00)
     EEPROM_SaveMovement(0, 
                         FACTORY_DEFAULT_PORTD, 
                         FACTORY_DEFAULT_PORTE, 
@@ -57,15 +58,11 @@ void EEPROM_InitStructure(void){
                         0x00, 
                         0x00, 
                         default_times);
-
     // 2. Definir los valores de fábrica para la Secuencia 0
-    // La secuencia contiene 1 movimiento: el índice 0.
-    // El resto del array se rellena con 0xFF como es estándar.
     uint8_t default_sequence_indices[12] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     EEPROM_SaveSequence(0, 1, default_sequence_indices);
     
-    // 3. Escribir la bandera de inicialización al final para marcar el proceso como completado.
-    // Esto asegura que esta función no se vuelva a ejecutar en reinicios posteriores.
+    // 3. Escribir la bandera de inicialización
     EEPROM_Write(0x000, 0xAA);
 }
 
@@ -84,9 +81,7 @@ uint8_t EEPROM_ReadControllerID(void) {
  * @details Este proceso puede tomar un momento en completarse.
  */
 void EEPROM_EraseAll(void) {
-    // Recorremos cada una de las direcciones de la memoria EEPROM
-    for (uint16_t i = 0; i < EEPROM_SIZE; i++) {
-        // Escribimos el valor 0xFF, que representa un byte borrado.
+    for (uint16_t i = 0; i < EEPROM_SIZE; i++) {        
         EEPROM_Write(i, 0xFF);
     }
 }

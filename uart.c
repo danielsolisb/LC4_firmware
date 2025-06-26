@@ -19,6 +19,9 @@ static volatile uint8_t uart_rx_buffer[UART_RX_BUFFER_SIZE];
 static volatile uint8_t uart_rx_index = 0;
 static volatile bool g_frame_received = false;
 
+// Prototipo de la función que construye y envía una trama
+static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
+
 #define UART_RESPONSE_BUFFER_SIZE 128
 static char uart_response_buffer[UART_RESPONSE_BUFFER_SIZE];
 
@@ -54,6 +57,64 @@ void UART1_SendString(const char *str) {
         tx_head = (tx_head + 1) % UART_TX_BUFFER_SIZE;
     }
     PIE1bits.TX1IE = 1;
+}
+
+/**
+ * @brief Construye y envía una trama de confirmación (ACK).
+ * @param original_cmd El comando que se está confirmando.
+ */
+void UART_Send_ACK(uint8_t original_cmd) {
+    uint8_t payload[1];
+    payload[0] = original_cmd;
+    UART_Send_Frame(CMD_ACK, payload, 1);
+}
+
+/**
+ * @brief Construye y envía una trama de error (NACK).
+ * @param original_cmd El comando que falló.
+ * @param error_code El código que especifica la razón del fallo.
+ */
+void UART_Send_NACK(uint8_t original_cmd, uint8_t error_code) {
+    uint8_t payload[2];
+    payload[0] = original_cmd;
+    payload[1] = error_code;
+    UART_Send_Frame(CMD_NACK, payload, 2);
+}
+
+/**
+ * @brief Función interna para construir y encolar cualquier trama de respuesta.
+ */
+static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len) {
+    uint8_t frame[UART_TX_BUFFER_SIZE];
+    uint8_t frame_idx = 0;
+    uint8_t checksum = cmd + len;
+
+    // Encabezado
+    frame[frame_idx++] = 0x43;
+    frame[frame_idx++] = 0x53;
+    frame[frame_idx++] = 0x4F;
+    
+    // Comando y Longitud
+    frame[frame_idx++] = cmd;
+    frame[frame_idx++] = len;
+
+    // Payload y cálculo de Checksum
+    for(uint8_t i = 0; i < len; i++) {
+        frame[frame_idx++] = payload[i];
+        checksum += payload[i];
+    }
+
+    // Checksum y Fin de Trama
+    frame[frame_idx++] = checksum;
+    frame[frame_idx++] = 0x03;
+    frame[frame_idx++] = 0xFF;
+
+    // Enviar la trama al buffer de transmisión
+    for(uint8_t i = 0; i < frame_idx; i++) {
+        uart_tx_buffer[tx_head] = frame[i];
+        tx_head = (tx_head + 1) % UART_TX_BUFFER_SIZE;
+    }
+    PIE1bits.TX1IE = 1; // Habilitar interrupción de transmisión
 }
 
 // =============================================================================
@@ -140,7 +201,7 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
     for (uint8_t i = 0; i < len; i++) chk_calc += buffer[2 + i];
     uint8_t chk_received = buffer[2 + len];
     if (chk_calc != chk_received) {
-        UART1_SendString("ERROR: Checksum incorrecto\r\n");
+        UART_Send_NACK(cmd, ERROR_CHECKSUM_INVALID);
         return;
     }
 
@@ -148,17 +209,17 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
     switch(cmd){
         
         // --- Comandos de EEPROM (no requieren bloqueo de RTC) ---
-        case 0x10: { // Guardar ID de controlador
-            if(len != 1) { UART1_SendString("ERROR: Longitud invalida para CMD 0x10\r\n"); break; }
+        case 0x10: { // Guardar ID
+            if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             EEPROM_SaveControllerID(buffer[2]);
-            UART1_SendString("ID del controlador guardado correctamente\r\n");
+            UART_Send_ACK(cmd);
             break;
         }
         case 0x11: { // Leer ID de controlador
-            if(len != 0) { UART1_SendString("ERROR: Longitud invalida para CMD 0x11\r\n"); break; }
+            if(len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t id = EEPROM_ReadControllerID();
             //char msg[64];
-            sprintf(uart_response_buffer, "ID del controlador: %02X\r\n", id);
+            sprintf(uart_response_buffer, "ID:%02X\r\n", id);
             UART1_SendString(uart_response_buffer);
             break;
         }
@@ -167,7 +228,7 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
 
         // --- Comandos de RTC (requieren bloqueo con semáforo) ---
         case 0x21: { // Consultar Hora
-            if(len != 0) { UART1_SendString("ERROR: Longitud invalida para CMD 0x21\r\n"); break; }
+            if(len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             
             g_rtc_access_in_progress = true; // <<-- BLOQUEAR ACCESO
             
@@ -184,54 +245,30 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
         
-        case 0x22: { // Establecer Hora
-            if (len != 7) { UART1_SendString("ERROR: Longitud invalida para CMD 0x22\r\n"); break; }
-            g_rtc_access_in_progress = true; // <<-- BLOQUEAR ACCESO
-            
+        case 0x22: { // Guardar Fecha/Hora
+            if (len != 7) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             RTC_Time new_time;
-            new_time.hour = buffer[2];
-            new_time.minute = buffer[3];
-            new_time.second = buffer[4];
-            new_time.day = buffer[5];
-            new_time.month = buffer[6];
-            new_time.year = buffer[7];
+            new_time.hour = buffer[2]; new_time.minute = buffer[3]; new_time.second = buffer[4];
+            new_time.day = buffer[5]; new_time.month = buffer[6]; new_time.year = buffer[7];
             new_time.dayOfWeek = buffer[8];
-            RTC_SetTime(&new_time);
-            UART1_SendString("Hora y Fecha actualizadas correctamente\r\n");
             
-            g_rtc_access_in_progress = false; // <<-- LIBERAR ACCESO
-            //nuevo
-            Scheduler_ForceReevaluation();
+            g_rtc_access_in_progress = true;
+            RTC_SetTime(&new_time);
+            g_rtc_access_in_progress = false;
+            Scheduler_ReloadCache();
+            UART_Send_ACK(cmd);
             break;
         }
+        
         case 0x23: { // Guardar Movimiento
-            // Payload: index(1) + 5 puertos(5) + 5 tiempos(5) = 11 bytes de datos
-            if (len != 11) {
-                UART1_SendString("ERROR: Longitud incorrecta para guardar movimiento (esperado 11)\r\n");
-                break;
-            }
-            uint8_t index = buffer[2];
-            uint8_t portD = buffer[3];
-            uint8_t portE = buffer[4];
-            uint8_t portF = buffer[5];
-            uint8_t portH = buffer[6];
-            uint8_t portJ = buffer[7];
-
-            uint8_t times[5];
-            for(uint8_t i = 0; i < 5; i++) {
-                times[i] = buffer[8 + i];
-            }
-
-            // La función EEPROM_SaveMovement ya se encarga de aplicar las máscaras de validación
-            EEPROM_SaveMovement(index, portD, portE, portF, portH, portJ, times);
-            UART1_SendString("Movimiento guardado correctamente\r\n");
+            if (len != 11) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            EEPROM_SaveMovement(buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7], &buffer[8]);
+            UART_Send_ACK(cmd);
             break;
         }
+        
         case 0x24: { // Leer Movimiento
-            if(len != 1) {
-                UART1_SendString("ERROR: Longitud incorrecta para lectura de movimiento\r\n");
-                break;
-            }
+            if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t index = buffer[2];
     
             // <<< PASO 1: Declarar las variables para los nuevos puertos H y J
@@ -294,31 +331,16 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         }
         
         case 0x30: { // Guardar Secuencia
-            if (len != 14) {
-                // Esta comprobación específica del comando sigue siendo útil
-                UART1_SendString("ERROR: Longitud de payload incorrecta para secuencia\r\n");
-                break;
-            }
-            uint8_t sec_index = buffer[2];
-            uint8_t num_movements = buffer[3];
-            uint8_t movements_indices[12];
-            for(uint8_t i = 0; i < 12; i++){
-                movements_indices[i] = buffer[4 + i];
-            }
-            EEPROM_SaveSequence(sec_index, num_movements, movements_indices);
-            UART1_SendString("Secuencia guardada correctamente\r\n");
-            //nuevo
-            Scheduler_ForceReevaluation();
-            UART1_SendString("Secuencia guardada. Reevaluando planes...\r\n");
+            if (len != 14) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            EEPROM_SaveSequence(buffer[2], buffer[3], &buffer[4]);
+            Scheduler_ReloadCache();
+            UART_Send_ACK(cmd);
             break;
         }
         
         case 0x31: { // Leer Secuencia
             // Leer secuencia de movimientos (LEN = 1: sec_index)
-            if(len != 1) {
-                UART1_SendString("ERROR: Longitud incorrecta para lectura de secuencia\r\n");
-                break;
-            }
+            if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t sec_index = buffer[2];
             uint8_t num_movements; // Cambiado de num_steps
             uint8_t movements_indices[12]; // Cambiado de steps_indices
@@ -338,33 +360,18 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
         
-        case 0x40: {
-            // Payload: [plan_idx(1), tipo_dia(1), sec_idx(1), time_sel(1), hour(1), minute(1)] = 6 bytes
-            if(len != 6) {
-                UART1_SendString("ERROR: Longitud incorrecta para guardar plan\r\n");
-                break;
-            }
-            uint8_t plan_index = buffer[2];
-            uint8_t id_tipo_dia  = buffer[3];
-            uint8_t sec_index   = buffer[4];
-            uint8_t time_sel    = buffer[5];
-            uint8_t hour        = buffer[6];
-            uint8_t minute      = buffer[7];
-            EEPROM_SavePlan(plan_index, id_tipo_dia, sec_index, time_sel, hour, minute);
-            UART1_SendString("Plan guardado correctamente\r\n");
-            //nuevo
-            Scheduler_ForceReevaluation();
-            UART1_SendString("Plan guardado. Reevaluando planes...\r\n");
+        case 0x40: { // Guardar Plan
+            if(len != 6) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            EEPROM_SavePlan(buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
+            Scheduler_ReloadCache();
+            UART_Send_ACK(cmd);
             break;
         }
         
         // NUEVA FUNCIONALIDAD: Leer un Plan (CMD 0x41)
         case 0x41: {
             // Payload esperado: 1 byte: [plan_index]
-            if(len != 1) {
-                UART1_SendString("ERROR: Longitud incorrecta para leer plan\r\n");
-                break;
-            }
+            if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t plan_index = buffer[2];
 
             // <<< PASO 1: Renombrar 'day' a 'id_tipo_dia' y ajustar el orden
@@ -384,33 +391,16 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
         
-        case 0x50: { // Guardar Bloque de Intermitencia
-            // Payload: slot_index(1) + id_plan(1) + mov_idx(1) + mask_d(1) + mask_e(1) + mask_f(1) = 6 bytes
-            if (len != 6) {
-                UART1_SendString("ERROR: Longitud incorrecta para guardar intermitencia (esperado 6)\r\n");
-                break;
-            }
-            uint8_t slot_index = buffer[2];
-            uint8_t id_plan    = buffer[3];
-            uint8_t mov_idx    = buffer[4];
-            uint8_t mask_d     = buffer[5];
-            uint8_t mask_e     = buffer[6];
-            uint8_t mask_f     = buffer[7];
-
-            EEPROM_SaveIntermittence(slot_index, id_plan, mov_idx, mask_d, mask_e, mask_f);
-            UART1_SendString("Bloque de intermitencia guardado\r\n");
-            //nuevo
-            Scheduler_ForceReevaluation();
-            UART1_SendString("Bloque de intermitencia guardado. Reevaluando...\r\n");
+        case 0x50: { // Guardar Intermitencia
+            if (len != 6) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            EEPROM_SaveIntermittence(buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
+            UART_Send_ACK(cmd);
             break;
         }
 
         case 0x51: { // Leer Bloque de Intermitencia
             // Payload: slot_index(1) = 1 byte
-            if (len != 1) {
-                UART1_SendString("ERROR: Longitud incorrecta para leer intermitencia (esperado 1)\r\n");
-                break;
-            }
+            if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t slot_index = buffer[2];
             uint8_t id_plan, mov_idx, mask_d, mask_e, mask_f;
 
@@ -429,24 +419,15 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         }
         
         case 0x60: { // Guardar Feriado
-            // Payload: [index(1), dia(1), mes(1)] = 3 bytes
-            if (len != 3) { /* ... error ... */ break; }
-            uint8_t index = buffer[2];
-            uint8_t day = buffer[3];
-            uint8_t month = buffer[4];
-            EEPROM_SaveHoliday(index, day, month);
-            UART1_SendString("Feriado guardado\r\n");
-            //nuevo
-            Scheduler_ForceReevaluation();
-            UART1_SendString("Feriado guardado. Reevaluando agenda...\r\n");
+            if (len != 3) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            EEPROM_SaveHoliday(buffer[2], buffer[3], buffer[4]);
+            Scheduler_ReloadCache();
+            UART_Send_ACK(cmd);
             break;
         }
         
         case 0x61: { // Leer TODOS los Feriados
-            if (len != 0) {
-                UART1_SendString("ERROR: Comando no requiere payload\r\n");
-                break;
-            }
+            if(len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             
             UART1_SendString("--- Feriados Guardados ---\r\n");
             uint8_t day, month;
@@ -473,35 +454,29 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
 
-        case 0xF0: { // Comando para restaurar a fábrica
-            if (len != 0) {
-                UART1_SendString("ERROR: Comando de restauracion no requiere payload\r\n");
-                break;
+        case 0xF0: { // Restaurar a Fábrica
+            if (len != 0) { 
+                UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); 
+                break; 
             }
+
+            // Paso 1: Confirmar INMEDIATAMENTE que se recibió la orden.
+            UART_Send_ACK(cmd);
             
-            UART1_SendString("Restaurando a valores de fabrica...\r\n");
-            
-            // Paso 1: Borra toda la memoria EEPROM.
+            // Paso 2: Ahora sí, realizar las operaciones largas.
+            // La GUI ya recibió su confirmación y no dará timeout.
             EEPROM_EraseAll();
-            
-            // --- PASO 2 (AÑADIDO): Vuelve a escribir la estructura inicial ---
-            // Esto incluye los valores por defecto del Movimiento 0, la Secuencia 0
-            // y la bandera de inicialización 0xAA.
             EEPROM_InitStructure();
+            Scheduler_ReloadCache();
             
-            UART1_SendString("Restauracion completada. Reiniciando logica...\r\n");
+            // Ya no se envía un ACK aquí, se envió al principio.
             
-            // Paso 3: Fuerza al planificador a re-evaluar su estado.
-            // Ahora encontrará los valores de fábrica y funcionará con ellos.
-            Scheduler_ForceReevaluation();
-            
+            // --- FIN DE LA CORRECCIÓN ---
             break;
         }
-
-        
         
         default:
-            UART1_SendString("Comando no reconocido\r\n");
+            UART_Send_NACK(cmd, ERROR_UNKNOWN_CMD);
             break;
     }
 }

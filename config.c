@@ -3,10 +3,31 @@
 #include <xc.h>
 #include "config.h"
 
+// Configuración del Oscilador: Cristal de alta velocidad
+#pragma config OSC = HS
+
+// Power-up Timer: Habilitado (da tiempo a que la fuente se estabilice)
+#pragma config PWRT = ON
+
+// Brown-out Reset: HABILITADO. Nivel de voltaje a 4.2V.
+// ESTA ES LA CORRECCIÓN MÁS IMPORTANTE.
+#pragma config BOR = ON
+#pragma config BORV = 42
+
+// Watchdog Timer: HABILITADO. Con un postscaler de 1:32768.
+// Esto da un tiempo de ~4 segundos antes de un reinicio si el sistema se cuelga.
+#pragma config WDT = ON
+#pragma config WDTPS = 32768
+
+// Low-Voltage Programming: Deshabilitado
+#pragma config LVP = OFF
+
+/*
 #pragma config OSC = HS
 #pragma config WDT = OFF
 #pragma config LVP = OFF
 #pragma config PWRT = ON
+*/
 void PIC_Init(void){
     
     // Configura todos los puertos analógicos como digitales

@@ -8,6 +8,21 @@
 
 #define UART_BUFFER_SIZE 64 // Se puede ajustar si se necesitan tramas más largas
 
+// --- Definiciones para el Protocolo ACK/NACK ---
+#define CMD_ACK 0x06 // Código para una respuesta de confirmación exitosa
+#define CMD_NACK 0x15 // Código para una respuesta de error
+
+// --- Códigos de Error para el Payload del NACK ---
+#define ERROR_CHECKSUM_INVALID 0x01
+#define ERROR_UNKNOWN_CMD 0x02
+#define ERROR_INVALID_LENGTH 0x03
+#define ERROR_INVALID_DATA 0x04
+#define ERROR_EXECUTION_FAIL 0x05
+
+// --- Prototipos de las nuevas funciones de respuesta ---
+void UART_Send_ACK(uint8_t original_cmd);
+void UART_Send_NACK(uint8_t original_cmd, uint8_t error_code);
+
 // --- Funciones Públicas Estándar ---
 void UART1_Init(uint32_t baudrate);
 void UART2_Init(uint32_t baudrate);
