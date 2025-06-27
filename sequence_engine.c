@@ -50,9 +50,6 @@ static int8_t running_plan_id = -1;
 
 static void apply_light_outputs(void);
 
-// --- NUEVA FUNCIÓN DE RETARDO SEGURA ---
-// Crea un retardo en milisegundos, pero limpia el Watchdog Timer
-// en cada paso para evitar reinicios durante secuencias largas.
 static void Safe_Delay_ms(uint16_t ms) {
     for (uint16_t i = 0; i < ms; i++) {
         CLRWDT();
@@ -60,33 +57,21 @@ static void Safe_Delay_ms(uint16_t ms) {
     }
 }
 
-// --- SECUENCIA DE INICIO RESTAURADA Y SEGURA ---
 void Sequence_Engine_RunStartupSequence(void) {
     uint8_t i;
     uint8_t mov0_ports[5];
-    uint8_t mov0_times[5]; // No se usa, pero la función lo requiere
+    uint8_t mov0_times[5];
     
-    // 1. Leer el Movimiento 0 de la EEPROM
     EEPROM_ReadMovement(0, &mov0_ports[0], &mov0_ports[1], &mov0_ports[2], &mov0_ports[3], &mov0_ports[4], mov0_times);
 
-    // --- NUEVA VALIDACIÓN DE SEGURIDAD ---
-    // Se comprueba si el movimiento leído es válido. Un movimiento inválido
-    // (típicamente 0xFF en todos sus bytes) indica que la EEPROM está vacía.
     if (!EEPROM_IsMovementValid(mov0_ports[0], mov0_ports[1], mov0_ports[2], mov0_ports[3], mov0_ports[4], mov0_times)) {
-        // Si no es válido, se carga un patrón seguro por defecto (Todos los Rojos)
-        // para la primera fase de la secuencia de inicio.
         mov0_ports[0] = ALL_RED_MASK_D;
         mov0_ports[1] = ALL_RED_MASK_E;
         mov0_ports[2] = ALL_RED_MASK_F;
         mov0_ports[3] = ALL_RED_MASK_H;
         mov0_ports[4] = ALL_RED_MASK_J;
     }
-    // Si el movimiento es válido, la función continuará usando los datos leídos.
-    // --- FIN DE LA VALIDACIÓN ---
-
-    // El resto de la lógica de la secuencia no cambia.
     
-    // FASE 1: Parpadeo del Movimiento 0 (o del patrón seguro) por 5 segundos
     for (i = 0; i < 5; i++) {
         LATD = mov0_ports[0]; LATE = mov0_ports[1]; LATF = mov0_ports[2]; LATH = mov0_ports[3]; LATJ = mov0_ports[4];
         Safe_Delay_ms(500);
@@ -94,7 +79,6 @@ void Sequence_Engine_RunStartupSequence(void) {
         Safe_Delay_ms(500);
     }
 
-    // FASE 2: Parpadeo de Todos los Rojos (3 segundos)
     for (i = 0; i < 3; i++) {
         LATD = ALL_RED_MASK_D; LATE = ALL_RED_MASK_E; LATF = ALL_RED_MASK_F; LATH = ALL_RED_MASK_H; LATJ = ALL_RED_MASK_J;
         Safe_Delay_ms(500);
@@ -102,7 +86,6 @@ void Sequence_Engine_RunStartupSequence(void) {
         Safe_Delay_ms(500);
     }
 
-    // FASE 3: Parpadeo de Todos los Amarillos (3 segundos)
     for (i = 0; i < 3; i++) {
         LATD = ALL_YELLOW_MASK_D; LATE = ALL_YELLOW_MASK_E; LATF = ALL_YELLOW_MASK_F; LATH = ALL_YELLOW_MASK_H; LATJ = ALL_YELLOW_MASK_J;
         Safe_Delay_ms(500);
@@ -111,9 +94,8 @@ void Sequence_Engine_RunStartupSequence(void) {
     }
 }
 
-
 void Sequence_Engine_Init(void) {
-    engine_state = STATE_FALLBACK_MODE; // Seguro por defecto
+    engine_state = STATE_FALLBACK_MODE;
     active_sequence_step = 0;
     movement_countdown_s = 0;
     active_intermittence_rule.active = false;
@@ -178,6 +160,18 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
             if (movement_countdown_s == 0) {
                 if (active_sequence_step == 0 && active_sequence.num_movements > 0) {
                     if (plan_change_pending) {
+                        
+                        // =====================================================
+                        // --- NUEVA LÓGICA DE INICIO DE DÍA ---
+                        // Se comprueba si el plan que acaba de terminar es el Plan 0.
+                        if (running_plan_id == 0) {
+                            // Si es así, se ejecuta la secuencia de inicio completa
+                            // antes de cargar el nuevo plan.
+                            Sequence_Engine_RunStartupSequence();
+                        }
+                        // --- FIN DE LA NUEVA LÓGICA ---
+                        // =====================================================
+
                         Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
                         break;
                     }
@@ -226,7 +220,6 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
     }
 }
 
-// --- LÓGICA DE INTERMITENCIA CORREGIDA Y DEFINITIVA ---
 static void apply_light_outputs(void) {
     if (active_intermittence_rule.active) {
         uint8_t pD = current_mov_ports[0];
@@ -236,24 +229,21 @@ static void apply_light_outputs(void) {
         uint8_t maskE = active_intermittence_rule.mask_e;
         uint8_t maskF = active_intermittence_rule.mask_f;
 
-        if (blink_phase_on) { // Fase ON del parpadeo
-            // Se encienden las luces sólidas (no en máscara) Y las luces intermitentes (en máscara)
+        if (blink_phase_on) {
             LATD = (pD & ~maskD) | maskD;
             LATE = (pE & ~maskE) | maskE;
             LATF = (pF & ~maskF) | maskF;
-        } else { // Fase OFF del parpadeo
-            // Se encienden SÓLO las luces sólidas. Las intermitentes se apagan.
+        } else {
             LATD = pD & ~maskD;
             LATE = pE & ~maskE;
             LATF = pF & ~maskF;
         }
-    } else { // No hay intermitencia, todo es sólido
+    } else {
         LATD = current_mov_ports[0];
         LATE = current_mov_ports[1];
         LATF = current_mov_ports[2];
     }
     
-    // Los puertos H y J nunca son intermitentes en este diseño
     LATH = current_mov_ports[3];
     LATJ = current_mov_ports[4];
 }
