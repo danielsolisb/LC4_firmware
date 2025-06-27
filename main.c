@@ -29,29 +29,32 @@ void main(void) {
         EEPROM_InitStructure();
     }
     
-    // =========================================================================
-    // >>> CORRECCIÓN CRÍTICA DE ORDEN <<<
-    // 1. Se inicializa el motor de secuencias (lo preparamos).
+    // Inicialización de los módulos de lógica principal
     Sequence_Engine_Init();
-    
-    // 2. Se inicializa el planificador, que ahora puede usar el motor de forma segura.
     Scheduler_Init();
-    // =========================================================================
     
     UART1_SendString("Controlador semaforico CORMAR inicializado\r\n");
+
+    // =========================================================================
+    // --- NUEVA VERIFICACIÓN DE ARRANQUE SEGURO ---
+    // Esta es la "red de seguridad". Si después de inicializar todo,
+    // el motor no tiene un plan activo, significa que el Scheduler no encontró
+    // nada que ejecutar. En este caso, forzamos el modo Fallback para
+    // asegurar que el controlador nunca se quede en silencio.
+    if (Sequence_Engine_GetRunningPlanID() == -1) {
+        Sequence_Engine_EnterFallback();
+    }
+    // =========================================================================
 
     // El bucle principal no cambia
     while(1) {
         CLRWDT();
         UART_Task();
 
-        // --- NUEVA LÓGICA DE MANEJO DE TIEMPO CENTRALIZADO ---
-        
-        // 1. Leer las banderas una sola vez al inicio del ciclo.
+        // Lógica de manejo de tiempo centralizado
         bool half_tick = g_half_second_flag;
         bool sec_tick = g_one_second_flag;
 
-        // 2. Consumir las banderas inmediatamente para no perder ticks.
         if (half_tick) {
             g_half_second_flag = false;
         }
@@ -59,15 +62,12 @@ void main(void) {
             g_one_second_flag = false;
         }
         
-        // 3. Ejecutar las tareas pasando las banderas como parámetros.
-        
         // El Scheduler solo necesita el tick de un segundo.
         if (sec_tick) {
             Scheduler_Task();
         }
 
-        // El Motor de Secuencias necesita ambos ticks para funcionar correctamente.
-        // Se llama si ha ocurrido cualquiera de los dos ticks.
+        // El Motor de Secuencias necesita ambos ticks para funcionar.
         if (half_tick || sec_tick) {
             Sequence_Engine_Run(half_tick, sec_tick);
         }

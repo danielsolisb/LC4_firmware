@@ -6,6 +6,7 @@
 #include "eeprom.h"
 #include "rtc.h"
 #include "scheduler.h"
+#include "sequence_engine.h"
 
 // --- Buffers para comunicación asíncrona ---
 #define UART_TX_BUFFER_SIZE 128
@@ -469,7 +470,7 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             EEPROM_InitStructure();
             Scheduler_ReloadCache();
             
-            // Ya no se envía un ACK aquí, se envió al principio.
+            Sequence_Engine_EnterFallback();
             
             // --- FIN DE LA CORRECCIÓN ---
             break;

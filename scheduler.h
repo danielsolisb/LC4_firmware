@@ -28,6 +28,6 @@ void Scheduler_Task(void);
  */
 void Scheduler_ReloadCache(void);
 
-int8_t Scheduler_GetActivePlanID(void);
+//int8_t Scheduler_GetActivePlanID(void);
 
 #endif // SCHEDULER_H

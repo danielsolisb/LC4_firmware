@@ -3,7 +3,7 @@
 #include "eeprom.h"
 #include "timers.h"
 #include "config.h"
-#include "scheduler.h" 
+// Se elimina la inclusión de scheduler.h ya que no se usa directamente
 #include <xc.h>
 
 // --- Definiciones de Estados y Variables Estáticas ---
@@ -28,7 +28,7 @@ static struct {
 } active_sequence;
 static uint8_t active_sequence_step;
 
-static bool blink_phase_on = false; 
+static bool blink_phase_on = false;
 static struct {
     bool active;
     uint8_t mask_d;
@@ -38,19 +38,38 @@ static struct {
 
 static uint8_t current_mov_ports[5];
 
+// --- NUEVAS VARIABLES PARA CAMBIO DE PLAN CONTROLADO ---
+static bool plan_change_pending = false;
+static uint8_t pending_sec_index;
+static uint8_t pending_time_sel;
+static int8_t pending_plan_id;
+static int8_t running_plan_id = -1; // ID del plan actualmente en ejecución
+
 // Prototipo de función interna
 static void apply_light_outputs(void);
 
-// --- Funciones de Control (Init, Start, Stop, etc.) ---
+// --- Funciones de Control ---
 void Sequence_Engine_Init(void) {
-    engine_state = STATE_INACTIVE;
+    // --- CAMBIO CRÍTICO ---
+    // El estado inicial ahora es FALLBACK, no INACTIVE.
+    // Esto garantiza que si nada más da una orden, el controlador
+    // entra en modo seguro (rojo intermitente) por defecto.
+    engine_state = STATE_FALLBACK_MODE;
+
     active_sequence_step = 0;
     movement_countdown_s = 0;
     active_intermittence_rule.active = false;
+    plan_change_pending = false;
+    running_plan_id = -1;
     LATD = 0x00; LATE = 0x00; LATF = 0x00; LATH = 0x00; LATJ = 0x00;
 }
 
-void Sequence_Engine_Start(uint8_t sec_index, uint8_t time_sel) {
+// MODIFICADA: Ahora recibe y almacena el plan_id
+void Sequence_Engine_Start(uint8_t sec_index, uint8_t time_sel, int8_t plan_id) {
+    // Un inicio forzado cancela cualquier cambio que estuviera pendiente
+    plan_change_pending = false;
+    running_plan_id = plan_id;
+
     if (sec_index >= MAX_SEQUENCES) {
         engine_state = STATE_FALLBACK_MODE;
         return;
@@ -67,31 +86,54 @@ void Sequence_Engine_Start(uint8_t sec_index, uint8_t time_sel) {
     }
 }
 
+// NUEVA: Almacena la solicitud de cambio para ser procesada al final del ciclo
+void Sequence_Engine_RequestPlanChange(uint8_t sec_index, uint8_t time_sel, int8_t new_plan_id) {
+    plan_change_pending = true;
+    pending_sec_index = sec_index;
+    pending_time_sel = time_sel;
+    pending_plan_id = new_plan_id;
+}
+
+// NUEVA: Permite a otros módulos saber qué plan está corriendo realmente
+int8_t Sequence_Engine_GetRunningPlanID(void) {
+    return running_plan_id;
+}
+
 void Sequence_Engine_Stop(void) {
     engine_state = STATE_INACTIVE;
+    running_plan_id = -1;
     LATD = 0x00; LATE = 0x00; LATF = 0x00; LATH = 0x00; LATJ = 0x00;
 }
 
 void Sequence_Engine_EnterFallback(void) {
     engine_state = STATE_FALLBACK_MODE;
+    running_plan_id = -1;
 }
 
-// --- TAREA PRINCIPAL (LÓGICA RECONSTRUIDA Y SIMPLIFICADA) ---
+// --- TAREA PRINCIPAL (LÓGICA DE CAMBIO DE PLAN ACTUALIZADA) ---
 void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
-    // La lógica de parpadeo solo depende del tick de medio segundo
     if (half_second_tick) {
         blink_phase_on = !blink_phase_on;
     }
-    
-    // La cuenta atrás solo depende del tick de un segundo
+
     if (one_second_tick) {
         if (engine_state == STATE_RUNNING_SEQUENCE && movement_countdown_s > 0) {
             movement_countdown_s--;
         }
     }
-    
-    // --- Lógica de Cambio de Movimiento ---
+
     if (engine_state == STATE_RUNNING_SEQUENCE && movement_countdown_s == 0) {
+        // --- LÓGICA DE FIN DE CICLO Y CAMBIO DE PLAN ---
+        if (active_sequence_step == 0 && active_sequence.num_movements > 0) { // Indica que un ciclo completo acaba de terminar
+            if (plan_change_pending) {
+                // Hay un cambio pendiente, lo ejecutamos AHORA.
+                Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
+                // La llamada a Start ya resetea la bandera y actualiza el running_plan_id
+                // Salimos para que el próximo ciclo de Run() procese el nuevo estado.
+                return;
+            }
+        }
+
         if (active_sequence.num_movements == 0) {
             engine_state = STATE_FALLBACK_MODE;
             return;
@@ -102,21 +144,21 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
             engine_state = STATE_FALLBACK_MODE;
             return;
         }
-        
+
         uint8_t times[5];
         EEPROM_ReadMovement(mov_idx, &current_mov_ports[0], &current_mov_ports[1], &current_mov_ports[2], &current_mov_ports[3], &current_mov_ports[4], times);
-        
+
         if (current_time_selector >= 5) current_time_selector = 0;
         movement_countdown_s = times[current_time_selector];
         if (movement_countdown_s == 0) movement_countdown_s = 1;
 
         active_intermittence_rule.active = false;
-        int8_t current_plan_id = Scheduler_GetActivePlanID();
-        if (current_plan_id != -1) {
+        // La comprobación de intermitencia ahora usa el ID del plan que realmente corre
+        if (running_plan_id != -1) {
             for (uint8_t i = 0; i < MAX_INTERMITENCES; i++) {
                 uint8_t p_id, m_id, mD, mE, mF;
                 EEPROM_ReadIntermittence(i, &p_id, &m_id, &mD, &mE, &mF);
-                if (p_id == (uint8_t)current_plan_id && m_id == mov_idx) {
+                if (p_id == (uint8_t)running_plan_id && m_id == mov_idx) {
                     active_intermittence_rule.active = true;
                     active_intermittence_rule.mask_d = mD;
                     active_intermittence_rule.mask_e = mE;
@@ -125,10 +167,11 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                 }
             }
         }
+        
+        // Avanzar al siguiente paso de la secuencia
         active_sequence_step = (active_sequence_step + 1) % active_sequence.num_movements;
     }
-    
-    // --- Aplicación de Salidas (siempre se ejecuta si el motor no está inactivo) ---
+
     if (engine_state == STATE_RUNNING_SEQUENCE) {
         apply_light_outputs();
     } else if (engine_state == STATE_FALLBACK_MODE) {
@@ -139,7 +182,6 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
         }
     }
 }
-
 
 static void apply_light_outputs(void) {
     if (active_intermittence_rule.active) {
@@ -155,7 +197,6 @@ static void apply_light_outputs(void) {
     LATH = current_mov_ports[3]; LATJ = current_mov_ports[4];
 }
 
-// --- Funciones de Arranque (sin cambios) ---
 void Sequence_Engine_RunStartupSequence(void) {
     bool lights_on = false;
     uint16_t num_cycles = (STARTUP_SEQUENCE_DURATION_S * 1000) / (STARTUP_FLASH_DELAY_MS * 2);

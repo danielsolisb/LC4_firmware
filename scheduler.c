@@ -1,17 +1,4 @@
 //scheduler.c
-
-/*
- * File:   scheduler.c
- * Author: Daniel Solis
- *
- * Descripción:
- * Este archivo contiene la lógica del planificador del controlador semafórico.
- * Se ha modificado para implementar un nuevo sistema de agenda flexible basado
- * en un 'id_tipo_dia' que define grupos de días, eliminando la necesidad
- * de la antigua agenda semanal. La lógica prioriza feriados y mantiene
- * la selección del plan más reciente y la continuidad con el día anterior.
- */
-
 #include "scheduler.h"
 #include "rtc.h"
 #include "eeprom.h"
@@ -20,33 +7,31 @@
 #include "sequence_engine.h"
 #include <stdio.h>
 
-// --- Variables Globales y Estáticas (Sin cambios) ---
+// --- Variables Globales y Estáticas ---
 volatile bool g_rtc_access_in_progress = false;
 static Plan g_plan_cache[MAX_PLANS];
-static int8_t g_active_plan_index = -1;
-
+// Esta variable ahora representa el plan que el scheduler *ha solicitado*.
+// No es necesariamente el que está corriendo en el motor.
+static int8_t g_requested_plan_index = -1;
 
 // --- Prototipos de Funciones Internas ---
 static bool Scheduler_IsDateHoliday(RTC_Time* date);
 static bool IsPlanValidForDay(uint8_t id_tipo_dia, uint8_t dayOfWeek, bool is_holiday);
 static void Scheduler_LoadPlansToCache(void);
 static void Scheduler_UpdateAndExecutePlan(void);
-
-// --- NUEVA FUNCIÓN DE AYUDA ---
 static void Scheduler_GetYesterdayContext(RTC_Time* today, uint8_t* yesterday_dow, bool* is_yesterday_holiday);
 static bool IsLeapYear(uint8_t year_yy);
 
 //==============================================================================
-// --- FUNCIONES PÚBLICAS (Sin cambios en la interfaz) ---
+// --- FUNCIONES PÚBLICAS ---
 //==============================================================================
 void Scheduler_Init(void) {
     Scheduler_LoadPlansToCache();
+    // La primera evaluación de plan se hace aquí para arrancar con el plan correcto
     Scheduler_UpdateAndExecutePlan();
 }
 
-void Scheduler_ReloadCache(void) { // <-- ANTES: Scheduler_ForceReevaluation
-    // Ahora, esta función solo recarga los planes a la memoria RAM.
-    // NO fuerza una re-evaluación inmediata del plan activo.
+void Scheduler_ReloadCache(void) {
     Scheduler_LoadPlansToCache();
 }
 
@@ -57,15 +42,13 @@ void Scheduler_Task(void) {
     RTC_GetTime(&now);
     g_rtc_access_in_progress = false;
 
+    // La tarea se sigue ejecutando cada minuto en el segundo 0
     if (now.second == 0) {
         Scheduler_UpdateAndExecutePlan();
     }
 }
 
-int8_t Scheduler_GetActivePlanID(void) {
-    return g_active_plan_index;
-}
-
+// ELIMINADA: La función Scheduler_GetActivePlanID() ya no existe aquí.
 
 //==============================================================================
 // --- IMPLEMENTACIÓN DE LA LÓGICA DE PLANIFICACIÓN ---
@@ -77,43 +60,32 @@ static void Scheduler_LoadPlansToCache(void) {
     }
 }
 
+// Lógica de cálculo de fecha no cambia
 static bool IsLeapYear(uint8_t year_yy) {
-    // Válido para el rango de años 2000-2099
     return (year_yy % 4 == 0);
 }
 
 static void Scheduler_GetYesterdayContext(RTC_Time* today, uint8_t* yesterday_dow, bool* is_yesterday_holiday) {
-    RTC_Time yesterday = *today; // Copia la fecha de hoy para empezar
-
-    // Calcular el día de la semana de ayer
+    RTC_Time yesterday = *today;
     *yesterday_dow = (today->dayOfWeek == 1) ? 7 : today->dayOfWeek - 1;
-
-    // Calcular la fecha de ayer
     if (yesterday.day > 1) {
         yesterday.day--;
     } else {
-        // Es el primer día del mes, retrocedemos un mes
-        if (yesterday.month == 1) { // Enero
+        if (yesterday.month == 1) {
             yesterday.month = 12;
             yesterday.day = 31;
-            yesterday.year--; // Asumimos que no cruzamos el año 2000
+            yesterday.year--;
         } else {
             yesterday.month--;
-            // Array con los días de cada mes (índice 0 no se usa)
             const uint8_t days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
             yesterday.day = days_in_month[yesterday.month];
-            
-            // Caso especial para Febrero en año bisiesto
             if (yesterday.month == 2 && IsLeapYear(yesterday.year)) {
                 yesterday.day = 29;
             }
         }
     }
-    
-    // Comprobar si la fecha calculada para ayer fue feriado
     *is_yesterday_holiday = Scheduler_IsDateHoliday(&yesterday);
 }
-
 
 static bool Scheduler_IsDateHoliday(RTC_Time* date) {
     for (uint8_t i = 0; i < MAX_HOLIDAYS; i++) {
@@ -152,18 +124,13 @@ static bool IsPlanValidForDay(uint8_t id_tipo_dia, uint8_t dayOfWeek, bool is_ho
     }
 }
 
-/**
- * @brief FUNCIÓN CENTRAL ACTUALIZADA.
- * @details Implementa la lógica completa, incluyendo la nueva agenda y
- * la lógica de fecha de continuidad 100% robusta.
- */
+// --- FUNCIÓN CENTRAL ACTUALIZADA ---
 static void Scheduler_UpdateAndExecutePlan(void) {
     RTC_Time now;
     g_rtc_access_in_progress = true;
     RTC_GetTime(&now);
     g_rtc_access_in_progress = false;
 
-    // --- Paso 1: Obtener contexto ---
     bool is_today_holiday = Scheduler_IsDateHoliday(&now);
     uint16_t current_time_in_minutes = now.hour * 60 + now.minute;
     
@@ -171,23 +138,18 @@ static void Scheduler_UpdateAndExecutePlan(void) {
     bool is_yesterday_holiday;
     Scheduler_GetYesterdayContext(&now, &yesterday_dow, &is_yesterday_holiday);
     
-    // --- Paso 2: Búsqueda del mejor plan ---
     int8_t best_candidate_for_today = -1;
     uint16_t time_of_best_candidate_today = 0;
-
     int8_t best_candidate_for_yesterday = -1;
     uint16_t time_of_best_candidate_yesterday = 0;
-
     bool any_plan_exists = false;
 
     for (uint8_t i = 0; i < MAX_PLANS; i++) {
         Plan* p = &g_plan_cache[i];
         if (p->id_tipo_dia > 14) continue;
         any_plan_exists = true;
-
         uint16_t plan_time = p->hour * 60 + p->minute;
 
-        // Búsqueda para HOY
         if (IsPlanValidForDay(p->id_tipo_dia, now.dayOfWeek, is_today_holiday)) {
             if (plan_time <= current_time_in_minutes) {
                 if (best_candidate_for_today == -1 || plan_time >= time_of_best_candidate_today) {
@@ -197,7 +159,6 @@ static void Scheduler_UpdateAndExecutePlan(void) {
             }
         }
         
-        // Búsqueda para AYER (para continuidad)
         if (IsPlanValidForDay(p->id_tipo_dia, yesterday_dow, is_yesterday_holiday)) {
             if (best_candidate_for_yesterday == -1 || plan_time >= time_of_best_candidate_yesterday) {
                 time_of_best_candidate_yesterday = plan_time;
@@ -206,7 +167,6 @@ static void Scheduler_UpdateAndExecutePlan(void) {
         }
     }
 
-    // --- Paso 3: Lógica de Decisión Final ---
     int8_t new_plan_index = -1;
     if (best_candidate_for_today != -1) {
         new_plan_index = best_candidate_for_today;
@@ -214,18 +174,32 @@ static void Scheduler_UpdateAndExecutePlan(void) {
         new_plan_index = best_candidate_for_yesterday;
     }
 
-    // --- Paso 4: Ejecución Final ---
+    // --- LÓGICA DE EJECUCIÓN MODIFICADA ---
     if (new_plan_index != -1) {
-        if (new_plan_index != g_active_plan_index) {
-            g_active_plan_index = new_plan_index;
-            Plan* active_plan = &g_plan_cache[g_active_plan_index];
-            Sequence_Engine_Start(active_plan->id_secuencia, active_plan->time_sel);
+        // ¿El plan que DEBERÍA estar activo es diferente al que solicitamos la última vez?
+        if (new_plan_index != g_requested_plan_index) {
+            g_requested_plan_index = new_plan_index;
+            Plan* active_plan = &g_plan_cache[g_requested_plan_index];
+            
+            // Si el motor está inactivo, lo iniciamos directamente.
+            // Si ya está corriendo, solicitamos un cambio controlado.
+            if (Sequence_Engine_GetRunningPlanID() == -1) {
+                Sequence_Engine_Start(active_plan->id_secuencia, active_plan->time_sel, g_requested_plan_index);
+            } else {
+                Sequence_Engine_RequestPlanChange(active_plan->id_secuencia, active_plan->time_sel, g_requested_plan_index);
+            }
         }
     } else if (any_plan_exists) {
-        g_active_plan_index = -1;
-        Sequence_Engine_Stop();
+        // Hay planes pero ninguno aplica. Detener el motor.
+        if (g_requested_plan_index != -1) {
+             g_requested_plan_index = -1;
+             Sequence_Engine_Stop();
+        }
     } else {
-        g_active_plan_index = -1;
-        Sequence_Engine_EnterFallback();
+        // No hay ningún plan en la EEPROM. Entrar en modo Fallback.
+        if (g_requested_plan_index != -1) {
+            g_requested_plan_index = -1;
+            Sequence_Engine_EnterFallback();
+        }
     }
 }
