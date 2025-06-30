@@ -1,5 +1,6 @@
 //main.c
 // Autor: Daniel Solis
+// Final 1era etapa.
 #include <xc.h>
 #include "config.h"
 #include "uart.h"
