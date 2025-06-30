@@ -12,9 +12,11 @@ void Sequence_Engine_Stop(void);
 void Sequence_Engine_RequestPlanChange(uint8_t sec_index, uint8_t time_sel, int8_t new_plan_id);
 int8_t Sequence_Engine_GetRunningPlanID(void);
 void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick);
-
-// Reintroducimos la función de secuencia de inicio como una función pública y separada
 void Sequence_Engine_RunStartupSequence(void);
+
+// --- NUEVA FUNCIÓN ---
+// Pone al motor en modo de flasheo manual de máxima prioridad.
+void Sequence_Engine_EnterManualFlash(void);
 
 void Sequence_Engine_EnterFallback(void);
 

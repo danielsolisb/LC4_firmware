@@ -8,7 +8,8 @@
 typedef enum {
     STATE_INACTIVE,
     STATE_RUNNING_SEQUENCE,
-    STATE_FALLBACK_MODE
+    STATE_FALLBACK_MODE,
+    STATE_MANUAL_FLASH
 } EngineState_t;
 
 #define ALL_RED_MASK_D   0x92
@@ -41,6 +42,7 @@ static struct {
 } active_intermittence_rule;
 
 static uint8_t current_mov_ports[5];
+static uint8_t manual_flash_ports[5];
 
 static bool plan_change_pending = false;
 static uint8_t pending_sec_index;
@@ -104,6 +106,13 @@ void Sequence_Engine_Init(void) {
     LATD = 0x00; LATE = 0x00; LATF = 0x00; LATH = 0x00; LATJ = 0x00;
 }
 
+void Sequence_Engine_EnterManualFlash(void) {
+    engine_state = STATE_MANUAL_FLASH;
+    running_plan_id = -1;
+    uint8_t dummy_times[5];
+    EEPROM_ReadMovement(0, &manual_flash_ports[0], &manual_flash_ports[1], &manual_flash_ports[2], &manual_flash_ports[3], &manual_flash_ports[4], dummy_times);
+}
+
 void Sequence_Engine_Start(uint8_t sec_index, uint8_t time_sel, int8_t plan_id) {
     plan_change_pending = false;
     running_plan_id = plan_id;
@@ -152,6 +161,14 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
     }
 
     switch (engine_state) {
+        case STATE_MANUAL_FLASH:
+            if (blink_phase_on) {
+                LATD = manual_flash_ports[0]; LATE = manual_flash_ports[1]; LATF = manual_flash_ports[2]; LATH = manual_flash_ports[3]; LATJ = manual_flash_ports[4];
+            } else {
+                LATD = 0; LATE = 0; LATF = 0; LATH = 0; LATJ = 0;
+            }
+            break;
+
         case STATE_RUNNING_SEQUENCE:
             if (one_second_tick && movement_countdown_s > 0) {
                 movement_countdown_s--;
@@ -160,18 +177,9 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
             if (movement_countdown_s == 0) {
                 if (active_sequence_step == 0 && active_sequence.num_movements > 0) {
                     if (plan_change_pending) {
-                        
-                        // =====================================================
-                        // --- NUEVA LÓGICA DE INICIO DE DÍA ---
-                        // Se comprueba si el plan que acaba de terminar es el Plan 0.
                         if (running_plan_id == 0) {
-                            // Si es así, se ejecuta la secuencia de inicio completa
-                            // antes de cargar el nuevo plan.
                             Sequence_Engine_RunStartupSequence();
                         }
-                        // --- FIN DE LA NUEVA LÓGICA ---
-                        // =====================================================
-
                         Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
                         break;
                     }
@@ -207,6 +215,15 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
             break;
 
         case STATE_FALLBACK_MODE:
+            // --- LÓGICA DE RECUPERACIÓN AÑADIDA ---
+            // Primero, se verifica si hay un plan pendiente solicitado por el Scheduler.
+            if (plan_change_pending) {
+                // Si hay un plan, se inicia y se sale del modo Fallback.
+                Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
+                break; // Salir del switch para procesar el nuevo estado en el próximo ciclo.
+            }
+            
+            // Si no hay plan pendiente, se continúa con el destello rojo.
             if (blink_phase_on) {
                 LATD = ALL_RED_MASK_D; LATE = ALL_RED_MASK_E; LATF = ALL_RED_MASK_F; LATH = ALL_RED_MASK_H; LATJ = ALL_RED_MASK_J;
             } else {
@@ -215,7 +232,6 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
             break;
 
         case STATE_INACTIVE:
-            // No hacer nada, luces apagadas.
             break;
     }
 }
