@@ -1,5 +1,6 @@
 //main.c
 // Autor: Daniel Solis
+// fecha 7/7/2025 
 #include <xc.h>
 #include "config.h"
 #include "uart.h"
