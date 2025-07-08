@@ -18,6 +18,11 @@
     #define _XTAL_FREQ 20000000UL
 #endif
 
+#define P1 PORTJbits.RJ7
+#define P2 PORTHbits.RH5
+#define P3 PORTHbits.RH6
+#define P4 PORTHbits.RH7
+
 void PIC_Init(void);
 
 #endif // CONFIG_H
