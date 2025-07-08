@@ -60,7 +60,8 @@ void EEPROM_InitStructure(void){
                         default_times);
     // 2. Definir los valores de fábrica para la Secuencia 0
     uint8_t default_sequence_indices[12] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    EEPROM_SaveSequence(0, 1, default_sequence_indices);
+    // AÑADIR anchor_mov_index (0) como tercer argumento
+    EEPROM_SaveSequence(0, SEQUENCE_TYPE_AUTOMATIC, 0, 1, default_sequence_indices);
     
     // 3. Escribir la bandera de inicialización
     EEPROM_Write(0x000, 0xAA);
@@ -143,31 +144,34 @@ bool EEPROM_IsMovementValid(uint8_t portD, uint8_t portE, uint8_t portF, uint8_t
 // Cada secuencia ocupa 13 bytes:
 // Byte 0: Número de pasos (n) de la secuencia (máx. 12)
 // Bytes 1 a 12: Lista de índices de pasos (si n < 12, se pueden rellenar con 0xFF)
-void EEPROM_SaveSequence(uint8_t sec_index, uint8_t num_movements, uint8_t *movements_indices) {
+void EEPROM_SaveSequence(uint8_t sec_index, uint8_t type, uint8_t anchor_mov_index, uint8_t num_movements, uint8_t *movements_indices) {
     uint16_t addr = EEPROM_BASE_SEQUENCES + (sec_index * SEQUENCE_SIZE);
-    
-    // Guardar el número de movimientos
-    EEPROM_Write(addr, num_movements);
-    
-    // --- LÓGICA CORREGIDA ---
-    // La GUI ya envía el array de 12 bytes rellenado con 0xFF.
-    // Simplemente escribimos los 12 bytes directamente.
+
+    EEPROM_Write(addr,     type);             // Guardar tipo en offset +0
+    EEPROM_Write(addr + 1, anchor_mov_index);  // Guardar ancla en offset +1
+    EEPROM_Write(addr + 2, num_movements);     // Guardar num_mov en offset +2
+
+    // Escribir los 12 bytes de los índices de movimiento (offset +3)
     for(uint8_t i = 0; i < 12; i++){
-        EEPROM_Write(addr + 1 + i, movements_indices[i]);
+        EEPROM_Write(addr + 3 + i, movements_indices[i]);
     }
 }
 
-
-void EEPROM_ReadSequence(uint8_t sec_index, uint8_t *num_movements, uint8_t *movements_indices) {
+void EEPROM_ReadSequence(uint8_t sec_index, uint8_t *type, uint8_t *anchor_mov_index, uint8_t *num_movements, uint8_t *movements_indices) {
     uint16_t addr = EEPROM_BASE_SEQUENCES + (sec_index * SEQUENCE_SIZE);
-    *num_movements = EEPROM_Read(addr);
-    // Validamos: si num_movements es mayor a 12 o 0xFF, consideramos la secuencia inexistente
+
+    *type = EEPROM_Read(addr);                 // Leer tipo desde offset +0
+    *anchor_mov_index = EEPROM_Read(addr + 1); // Leer ancla desde offset +1
+    *num_movements = EEPROM_Read(addr + 2);    // Leer num_mov desde offset +2
+
     if((*num_movements == 0xFF) || (*num_movements > 12)){
         *num_movements = 0;
         return;
     }
+
+    // Leer los índices de movimiento (offset +3)
     for(uint8_t i = 0; i < *num_movements; i++){
-        movements_indices[i] = EEPROM_Read(addr + 1 + i);
+        movements_indices[i] = EEPROM_Read(addr + 3 + i);
     }
 }
 
@@ -188,7 +192,6 @@ void EEPROM_SavePlan(uint8_t plan_index, uint8_t id_tipo_dia, uint8_t sec_index,
     EEPROM_Write(addr + 3, hour);
     EEPROM_Write(addr + 4, minute);
 }
-
 
 void EEPROM_ReadPlan(uint8_t plan_index, uint8_t *id_tipo_dia, uint8_t *sec_index, uint8_t *time_sel, uint8_t *hour, uint8_t *minute) {
     uint16_t addr = EEPROM_BASE_PLANS + (plan_index * PLAN_SIZE);
@@ -213,9 +216,7 @@ void EEPROM_ReadHoliday(uint8_t index, uint8_t *day, uint8_t *month) {
     *month = EEPROM_Read(addr + 1);
 }
 
-
 // --- NUEVAS FUNCIONES PARA LA TABLA DE INTERMITENCIAS ---
-
 void EEPROM_SaveIntermittence(uint8_t index, uint8_t id_plan, uint8_t indice_mov, uint8_t mask_d, uint8_t mask_e, uint8_t mask_f) {
     if (index >= MAX_INTERMITENCES) return; // Protección contra desbordamiento
 
@@ -241,4 +242,28 @@ void EEPROM_ReadIntermittence(uint8_t index, uint8_t *id_plan, uint8_t *indice_m
     *mask_d = EEPROM_Read(addr + 2);
     *mask_e = EEPROM_Read(addr + 3);
     *mask_f = EEPROM_Read(addr + 4);
+}
+
+void EEPROM_SaveFlowRule(uint8_t rule_index, uint8_t sec_index, uint8_t origin_mov_index, uint8_t rule_type, uint8_t demand_mask, uint8_t dest_mov_index) {
+    if (rule_index >= MAX_FLOW_CONTROL_RULES) return;
+    uint16_t addr = EEPROM_BASE_FLOW_CONTROL + (rule_index * FLOW_CONTROL_RULE_SIZE);
+    EEPROM_Write(addr,     sec_index);
+    EEPROM_Write(addr + 1, origin_mov_index);
+    EEPROM_Write(addr + 2, rule_type);
+    EEPROM_Write(addr + 3, demand_mask);
+    EEPROM_Write(addr + 4, dest_mov_index);
+    EEPROM_Write(addr + 5, 0xFF);
+}
+
+void EEPROM_ReadFlowRule(uint8_t rule_index, uint8_t *sec_index, uint8_t *origin_mov_index, uint8_t *rule_type, uint8_t *demand_mask, uint8_t *dest_mov_index) {
+    if (rule_index >= MAX_FLOW_CONTROL_RULES) {
+        *sec_index = 0xFF;
+        return;
+    }
+    uint16_t addr = EEPROM_BASE_FLOW_CONTROL + (rule_index * FLOW_CONTROL_RULE_SIZE);
+    *sec_index = EEPROM_Read(addr);
+    *origin_mov_index = EEPROM_Read(addr + 1);
+    *rule_type = EEPROM_Read(addr + 2);
+    *demand_mask = EEPROM_Read(addr + 3);
+    *dest_mov_index = EEPROM_Read(addr + 4);
 }

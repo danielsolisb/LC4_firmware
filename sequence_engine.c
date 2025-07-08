@@ -121,7 +121,13 @@ void Sequence_Engine_Start(uint8_t sec_index, uint8_t time_sel, int8_t plan_id) 
         engine_state = STATE_FALLBACK_MODE;
         return;
     }
-    EEPROM_ReadSequence(sec_index, &active_sequence.num_movements, active_sequence.movement_indices);
+
+    // Variables temporales para recibir los nuevos parámetros de la secuencia.
+    uint8_t temp_type;
+    uint8_t temp_anchor;
+    // Llamada a la función corregida con 5 argumentos.
+    EEPROM_ReadSequence(sec_index, &temp_type, &temp_anchor, &active_sequence.num_movements, active_sequence.movement_indices);
+
     if (active_sequence.num_movements > 0 && active_sequence.num_movements <= 12) {
         engine_state = STATE_RUNNING_SEQUENCE;
         current_time_selector = time_sel;

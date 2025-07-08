@@ -332,25 +332,32 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         }
         
         case 0x30: { // Guardar Secuencia
-            if (len != 14) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
-            EEPROM_SaveSequence(buffer[2], buffer[3], &buffer[4]);
+            // La trama ahora debe tener 15 bytes de payload:
+            // 1 (sec_index) + 1 (type) + 1 (anchor) + 1 (num_mov) + 12 (índices)
+            if (len != 15) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            // Llamada a la función corregida con los nuevos parámetros del buffer
+            EEPROM_SaveSequence(buffer[2], buffer[3], buffer[4], buffer[5], &buffer[6]);
             Scheduler_ReloadCache();
             UART_Send_ACK(cmd);
             break;
         }
         
         case 0x31: { // Leer Secuencia
-            // Leer secuencia de movimientos (LEN = 1: sec_index)
             if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t sec_index = buffer[2];
-            uint8_t num_movements; // Cambiado de num_steps
-            uint8_t movements_indices[12]; // Cambiado de steps_indices
-            EEPROM_ReadSequence(sec_index, &num_movements, movements_indices);
+            
+            // Variables para recibir los nuevos datos
+            uint8_t type, anchor_mov_index, num_movements;
+            uint8_t movements_indices[12];
+
+            // Llamada a la función corregida
+            EEPROM_ReadSequence(sec_index, &type, &anchor_mov_index, &num_movements, movements_indices);
+
             if(num_movements == 0){
                 UART1_SendString("Secuencia no existe o esta vacia\r\n");
             } else {
-                //char msg[80];
-                sprintf(uart_response_buffer, "Secuencia[%d]: Movimientos: ", sec_index); // Mensaje cambiado
+                // Mensaje de respuesta actualizado para mostrar todos los datos
+                sprintf(uart_response_buffer, "Sec[%d]: TIPO:%d ANCLA:%d MOV:", sec_index, type, anchor_mov_index);
                 UART1_SendString(uart_response_buffer);
                 for(uint8_t i = 0; i < num_movements; i++){
                     sprintf(uart_response_buffer, "%d ", movements_indices[i]);
@@ -454,7 +461,33 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             
             break;
         }
+        
+        case 0x70: { // Guardar Regla de Flujo
+            // Payload: 1(rule_idx) + 1(sec_idx) + 1(orig_mov) + 1(type) + 1(mask) + 1(dest_mov) = 6 bytes
+            if (len != 6) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            EEPROM_SaveFlowRule(buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
+            UART_Send_ACK(cmd);
+            break;
+        }
 
+        case 0x71: { // Leer Regla de Flujo
+            if (len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            uint8_t rule_index = buffer[2];
+            uint8_t sec_idx, orig_mov, rule_type, mask, dest_mov;
+
+            EEPROM_ReadFlowRule(rule_index, &sec_idx, &orig_mov, &rule_type, &mask, &dest_mov);
+
+            if (sec_idx == 0xFF) {
+                UART1_SendString("Regla de flujo no existe o esta vacia\r\n");
+            } else {
+                sprintf(uart_response_buffer, "Regla[%d]: Sec:%d MovOrig:%d Tipo:%d Mascara:0x%02X MovDest:%d\r\n",
+                        rule_index, sec_idx, orig_mov, rule_type, mask, dest_mov);
+                UART1_SendString(uart_response_buffer);
+            }
+            break;
+        }
+        
+        
         case 0xF0: { // Restaurar a Fábrica
             if (len != 0) { 
                 UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); 
