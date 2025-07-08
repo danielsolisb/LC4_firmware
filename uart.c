@@ -332,10 +332,11 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         }
         
         case 0x30: { // Guardar Secuencia
-            // La trama ahora debe tener 15 bytes de payload:
-            // 1 (sec_index) + 1 (type) + 1 (anchor) + 1 (num_mov) + 12 (índices)
-            if (len != 15) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
-            // Llamada a la función corregida con los nuevos parámetros del buffer
+            // La trama ahora debe tener 16 bytes de payload:
+            // 1(idx) + 1(tipo) + 1(ancla) + 1(num_mov) + 12(índices)
+            if (len != 16) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            
+            // La llamada a la función ya era correcta
             EEPROM_SaveSequence(buffer[2], buffer[3], buffer[4], buffer[5], &buffer[6]);
             Scheduler_ReloadCache();
             UART_Send_ACK(cmd);

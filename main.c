@@ -18,7 +18,9 @@ static bool g_manual_flash_active = false;
 
 // Definición de las banderas globales para las entradas P1 a P4.
 volatile bool g_demand_flags[4] = {false, false, false, false};
-
+#define DEBOUNCE_COUNT 5 // Número de ciclos de main para confirmar un estado
+static uint8_t p_counters[4] = {0, 0, 0, 0}; // Contadores para cada entrada P1-P4
+static bool p_last_state[4] = {false, false, false, false}; // Último estado estable conocido
 // Implementación de la función para limpiar las banderas.
 void Demands_ClearAll(void) {
     for(uint8_t i = 0; i < 4; i++) {
@@ -113,10 +115,35 @@ void main(void) {
 
 
 static void HandleDemandInputs(void) {
-    // Lógica simple de "latching": si se presiona una vez, la bandera queda en 'true'.
-    // NOTA: Para una implementación final, se podría añadir un antirrebote (debounce) aquí si los botones son mecánicos.
-    if (P1 == 1) g_demand_flags[0] = true;
-    if (P2 == 1) g_demand_flags[1] = true;
-    if (P3 == 1) g_demand_flags[2] = true;
-    if (P4 == 1) g_demand_flags[3] = true;
+    // Array para leer el estado actual de los pines P1 a P4
+    bool current_input[4];
+    current_input[0] = (P1 == 1);
+    current_input[1] = (P2 == 1);
+    current_input[2] = (P3 == 1);
+    current_input[3] = (P4 == 1);
+
+    // Iteramos por cada una de las 4 entradas de demanda
+    for (uint8_t i = 0; i < 4; i++) {
+        // Si el estado actual del pin es diferente al último estado estable que registramos...
+        if (current_input[i] != p_last_state[i]) {
+            // ...incrementamos su contador de "inestabilidad".
+            p_counters[i]++;
+            // Si el contador alcanza nuestro umbral de debounce...
+            if (p_counters[i] >= DEBOUNCE_COUNT) {
+                // ...el nuevo estado es oficial. Lo guardamos.
+                p_last_state[i] = current_input[i];
+
+                // DETECCIÓN DE FLANCO: Si el nuevo estado estable es ALTO (1)...
+                if (p_last_state[i] == true) {
+                    // ... ¡hemos detectado una pulsación! Activamos la bandera.
+                    g_demand_flags[i] = true;
+                }
+                // Reseteamos el contador para la próxima vez.
+                p_counters[i] = 0;
+            }
+        } else {
+            // Si el estado es el mismo, no hay cambio, así que reseteamos el contador.
+            p_counters[i] = 0;
+        }
+    }
 }

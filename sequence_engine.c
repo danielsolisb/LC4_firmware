@@ -4,6 +4,7 @@
 #include "timers.h"
 #include "config.h"
 #include <xc.h>
+#include "scheduler.h" 
 
 typedef enum {
     STATE_INACTIVE,
@@ -27,6 +28,10 @@ typedef enum {
 static EngineState_t engine_state;
 static uint8_t current_time_selector;
 static uint16_t movement_countdown_s;
+static uint8_t active_sequence_id; // NUEVO: Para saber qué secuencia estamos corriendo
+static uint8_t active_sequence_type; // NUEVO: Automática o Bajo Demanda
+static uint8_t active_sequence_anchor_mov; // NUEVO: Movimiento de salida segura
+
 static struct {
     uint8_t num_movements;
     uint8_t movement_indices[12];
@@ -122,17 +127,21 @@ void Sequence_Engine_Start(uint8_t sec_index, uint8_t time_sel, int8_t plan_id) 
         return;
     }
 
-    // Variables temporales para recibir los nuevos parámetros de la secuencia.
-    uint8_t temp_type;
-    uint8_t temp_anchor;
-    // Llamada a la función corregida con 5 argumentos.
-    EEPROM_ReadSequence(sec_index, &temp_type, &temp_anchor, &active_sequence.num_movements, active_sequence.movement_indices);
+    // Almacenamos el ID de la secuencia que vamos a correr
+    active_sequence_id = sec_index;
+
+    // Leemos todos los datos de la secuencia, incluyendo el tipo y el ancla
+    EEPROM_ReadSequence(sec_index,
+                        &active_sequence_type,
+                        &active_sequence_anchor_mov,
+                        &active_sequence.num_movements,
+                        active_sequence.movement_indices);
 
     if (active_sequence.num_movements > 0 && active_sequence.num_movements <= 12) {
         engine_state = STATE_RUNNING_SEQUENCE;
         current_time_selector = time_sel;
-        active_sequence_step = 0;
-        movement_countdown_s = 0;
+        active_sequence_step = 0; // Empezamos en el primer movimiento
+        movement_countdown_s = 0; // Forzamos la carga inmediata del primer movimiento
         active_intermittence_rule.active = false;
     } else {
         engine_state = STATE_FALLBACK_MODE;
@@ -181,55 +190,102 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
             }
 
             if (movement_countdown_s == 0) {
-                if (active_sequence_step == 0 && active_sequence.num_movements > 0) {
-                    if (plan_change_pending) {
-                        if (running_plan_id == 0) {
-                            Sequence_Engine_RunStartupSequence();
+                
+                if (plan_change_pending && active_sequence.movement_indices[active_sequence_step] == active_sequence_anchor_mov) {
+                    if (running_plan_id == 0) {
+                        Sequence_Engine_RunStartupSequence();
+                    }
+                    Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
+                    break;
+                }
+                
+                uint8_t next_step_index = (active_sequence_step + 1) % active_sequence.num_movements;
+
+                if (active_sequence_type == SEQUENCE_TYPE_DEMAND) {
+                    for (uint8_t i = 0; i < MAX_FLOW_CONTROL_RULES; i++) {
+                        
+                        // ===== CORRECCIÓN 1: Evitar reinicio por WDT =====
+                        CLRWDT(); 
+                        // =================================================
+
+                        uint8_t r_sec, r_orig, r_type, r_mask, r_dest;
+                        EEPROM_ReadFlowRule(i, &r_sec, &r_orig, &r_type, &r_mask, &r_dest);
+
+                        if (r_sec == active_sequence_id && r_orig == active_sequence.movement_indices[active_sequence_step]) {
+                            if (r_type == RULE_TYPE_GOTO) {
+                                next_step_index = r_dest;
+                            } else if (r_type == RULE_TYPE_DECISION_POINT) {
+                                
+                                // ===== CORRECCIÓN 2: Lógica de sensado robusta =====
+                                bool condition_met = false;
+                                for(uint8_t j = 0; j < 4; j++) {
+                                    // 1. Revisamos si la regla requiere esta demanda (bit en la máscara a 1)
+                                    if (r_mask & (1 << j)) {
+                                        // 2. Si la bandera de esa demanda está activa...
+                                        if (g_demand_flags[j] == true) {
+                                            condition_met = true;
+                                            // 3. ...la "consumimos" poniéndola a false inmediatamente.
+                                            g_demand_flags[j] = false; 
+                                        }
+                                    }
+                                }
+                                // =====================================================
+
+                                if (condition_met) {
+                                    next_step_index = r_dest;
+                                }
+                            }
+                            break; 
                         }
-                        Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
-                        break;
                     }
                 }
+                active_sequence_step = next_step_index;
 
                 if (active_sequence.num_movements == 0) {
-                    engine_state = STATE_FALLBACK_MODE; break;
+                    engine_state = STATE_FALLBACK_MODE; 
+                    break;
                 }
-                uint8_t mov_idx = active_sequence.movement_indices[active_sequence_step];
-                if (mov_idx >= MAX_MOVEMENTS) {
-                    engine_state = STATE_FALLBACK_MODE; break;
+                
+                uint8_t mov_idx_to_run = active_sequence.movement_indices[active_sequence_step];
+                
+                if (mov_idx_to_run >= MAX_MOVEMENTS) {
+                    engine_state = STATE_FALLBACK_MODE; 
+                    break;
                 }
+                
                 uint8_t times[5];
-                EEPROM_ReadMovement(mov_idx, &current_mov_ports[0], &current_mov_ports[1], &current_mov_ports[2], &current_mov_ports[3], &current_mov_ports[4], times);
+                EEPROM_ReadMovement(mov_idx_to_run, &current_mov_ports[0], &current_mov_ports[1], &current_mov_ports[2], &current_mov_ports[3], &current_mov_ports[4], times);
+                
                 movement_countdown_s = (current_time_selector < 5) ? times[current_time_selector] : 1;
                 if (movement_countdown_s == 0) movement_countdown_s = 1;
 
                 active_intermittence_rule.active = false;
                 if (running_plan_id != -1) {
                     for (uint8_t i = 0; i < MAX_INTERMITENCES; i++) {
+                        // ===== CORRECCIÓN 1 (PREVENTIVA): Evitar reinicio por WDT =====
+                        CLRWDT();
+                        // =============================================================
                         uint8_t p_id, m_id, mD, mE, mF;
                         EEPROM_ReadIntermittence(i, &p_id, &m_id, &mD, &mE, &mF);
-                        if (p_id == (uint8_t)running_plan_id && m_id == mov_idx) {
+                        if (p_id == (uint8_t)running_plan_id && m_id == mov_idx_to_run) {
                             active_intermittence_rule.active = true;
-                            active_intermittence_rule.mask_d = mD; active_intermittence_rule.mask_e = mE; active_intermittence_rule.mask_f = mF;
+                            active_intermittence_rule.mask_d = mD; 
+                            active_intermittence_rule.mask_e = mE; 
+                            active_intermittence_rule.mask_f = mF;
                             break;
                         }
                     }
                 }
-                active_sequence_step = (active_sequence_step + 1) % active_sequence.num_movements;
             }
+            
             apply_light_outputs();
             break;
 
         case STATE_FALLBACK_MODE:
-            // --- LÓGICA DE RECUPERACIÓN AÑADIDA ---
-            // Primero, se verifica si hay un plan pendiente solicitado por el Scheduler.
             if (plan_change_pending) {
-                // Si hay un plan, se inicia y se sale del modo Fallback.
                 Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
-                break; // Salir del switch para procesar el nuevo estado en el próximo ciclo.
+                break;
             }
-            
-            // Si no hay plan pendiente, se continúa con el destello rojo.
             if (blink_phase_on) {
                 LATD = ALL_RED_MASK_D; LATE = ALL_RED_MASK_E; LATF = ALL_RED_MASK_F; LATH = ALL_RED_MASK_H; LATJ = ALL_RED_MASK_J;
             } else {
