@@ -1,11 +1,16 @@
-//sequence_engine.c
+// sequence_engine.c
 #include "sequence_engine.h"
 #include "eeprom.h"
 #include "timers.h"
 #include "config.h"
 #include <xc.h>
-#include "scheduler.h" 
+#include "scheduler.h"
 
+// --- REFERENCIA A FUNCIÓN EXTERNA ---
+// Hacemos que este módulo conozca la función para limpiar las banderas de demanda.
+extern void Demands_ClearAll(void);
+
+// --- DEFINICIONES Y VARIABLES DEL MÓDULO ---
 typedef enum {
     STATE_INACTIVE,
     STATE_RUNNING_SEQUENCE,
@@ -28,9 +33,9 @@ typedef enum {
 static EngineState_t engine_state;
 static uint8_t current_time_selector;
 static uint16_t movement_countdown_s;
-static uint8_t active_sequence_id; // NUEVO: Para saber qué secuencia estamos corriendo
-static uint8_t active_sequence_type; // NUEVO: Automática o Bajo Demanda
-static uint8_t active_sequence_anchor_mov; // NUEVO: Movimiento de salida segura
+static uint8_t active_sequence_id;
+static uint8_t active_sequence_type;
+static uint8_t active_sequence_anchor_mov;
 
 static struct {
     uint8_t num_movements;
@@ -55,7 +60,10 @@ static uint8_t pending_time_sel;
 static int8_t pending_plan_id;
 static int8_t running_plan_id = -1;
 
+// Prototipos de funciones internas
 static void apply_light_outputs(void);
+static void Safe_Delay_ms(uint16_t ms);
+
 
 static void Safe_Delay_ms(uint16_t ms) {
     for (uint16_t i = 0; i < ms; i++) {
@@ -176,21 +184,12 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
     }
 
     switch (engine_state) {
-        case STATE_MANUAL_FLASH:
-            if (blink_phase_on) {
-                LATD = manual_flash_ports[0]; LATE = manual_flash_ports[1]; LATF = manual_flash_ports[2]; LATH = manual_flash_ports[3]; LATJ = manual_flash_ports[4];
-            } else {
-                LATD = 0; LATE = 0; LATF = 0; LATH = 0; LATJ = 0;
-            }
-            break;
-
         case STATE_RUNNING_SEQUENCE:
             if (one_second_tick && movement_countdown_s > 0) {
                 movement_countdown_s--;
             }
 
             if (movement_countdown_s == 0) {
-                
                 if (plan_change_pending && active_sequence.movement_indices[active_sequence_step] == active_sequence_anchor_mov) {
                     if (running_plan_id == 0) {
                         Sequence_Engine_RunStartupSequence();
@@ -198,86 +197,82 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                     Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
                     break;
                 }
-                
+
                 uint8_t next_step_index = (active_sequence_step + 1) % active_sequence.num_movements;
 
+                // --- LÓGICA DE DEMANDA CORREGIDA ---
+                // <<< INICIO DE LA LÓGICA DE DEMANDA CORREGIDA >>>
                 if (active_sequence_type == SEQUENCE_TYPE_DEMAND) {
-                    for (uint8_t i = 0; i < MAX_FLOW_CONTROL_RULES; i++) {
-                        
-                        // ===== CORRECCIÓN 1: Evitar reinicio por WDT =====
-                        CLRWDT(); 
-                        // =================================================
+                    bool decision_point_was_evaluated = false; // Flag para saber si procesamos una regla de decisión
 
+                    for (uint8_t i = 0; i < MAX_FLOW_CONTROL_RULES; i++) {
+                        CLRWDT();
                         uint8_t r_sec, r_orig, r_type, r_mask, r_dest;
                         EEPROM_ReadFlowRule(i, &r_sec, &r_orig, &r_type, &r_mask, &r_dest);
 
+                        // ¿La regla aplica a la secuencia y movimiento actual?
                         if (r_sec == active_sequence_id && r_orig == active_sequence.movement_indices[active_sequence_step]) {
                             if (r_type == RULE_TYPE_GOTO) {
                                 next_step_index = r_dest;
                             } else if (r_type == RULE_TYPE_DECISION_POINT) {
-                                
-                                // ===== CORRECCIÓN 2: Lógica de sensado robusta =====
+                                decision_point_was_evaluated = true; // Marcamos que este paso fue un punto de decisión
                                 bool condition_met = false;
                                 for(uint8_t j = 0; j < 4; j++) {
-                                    // 1. Revisamos si la regla requiere esta demanda (bit en la máscara a 1)
-                                    if (r_mask & (1 << j)) {
-                                        // 2. Si la bandera de esa demanda está activa...
-                                        if (g_demand_flags[j] == true) {
-                                            condition_met = true;
-                                            // 3. ...la "consumimos" poniéndola a false inmediatamente.
-                                            g_demand_flags[j] = false; 
-                                        }
+                                    // Si la regla usa esta demanda Y la bandera de esa demanda está activa...
+                                    if ((r_mask & (1 << j)) && (g_demand_flags[j] == true)) {
+                                        condition_met = true;
+                                        break; // Encontramos una demanda, no necesitamos seguir buscando
                                     }
                                 }
-                                // =====================================================
-
                                 if (condition_met) {
-                                    next_step_index = r_dest;
+                                    next_step_index = r_dest; // Si se cumplió la condición, saltamos
                                 }
                             }
-                            break; 
+                            break; // Encontramos la regla para este paso, salimos del bucle
                         }
                     }
+
+                    // Limpiamos las banderas SOLO SI el paso que acaba de terminar era un punto de decisión
+                    if (decision_point_was_evaluated) {
+                        Demands_ClearAll();
+                    }
                 }
+                // <<< FIN DE LA LÓGICA DE DEMANDA CORREGIDA >>>
+
                 active_sequence_step = next_step_index;
 
                 if (active_sequence.num_movements == 0) {
-                    engine_state = STATE_FALLBACK_MODE; 
+                    engine_state = STATE_FALLBACK_MODE;
                     break;
                 }
-                
+
                 uint8_t mov_idx_to_run = active_sequence.movement_indices[active_sequence_step];
-                
                 if (mov_idx_to_run >= MAX_MOVEMENTS) {
-                    engine_state = STATE_FALLBACK_MODE; 
+                    engine_state = STATE_FALLBACK_MODE;
                     break;
                 }
-                
+
                 uint8_t times[5];
                 EEPROM_ReadMovement(mov_idx_to_run, &current_mov_ports[0], &current_mov_ports[1], &current_mov_ports[2], &current_mov_ports[3], &current_mov_ports[4], times);
-                
                 movement_countdown_s = (current_time_selector < 5) ? times[current_time_selector] : 1;
                 if (movement_countdown_s == 0) movement_countdown_s = 1;
 
                 active_intermittence_rule.active = false;
                 if (running_plan_id != -1) {
                     for (uint8_t i = 0; i < MAX_INTERMITENCES; i++) {
-                        // ===== CORRECCIÓN 1 (PREVENTIVA): Evitar reinicio por WDT =====
                         CLRWDT();
-                        // =============================================================
                         uint8_t p_id, m_id, mD, mE, mF;
                         EEPROM_ReadIntermittence(i, &p_id, &m_id, &mD, &mE, &mF);
                         if (p_id == (uint8_t)running_plan_id && m_id == mov_idx_to_run) {
                             active_intermittence_rule.active = true;
-                            active_intermittence_rule.mask_d = mD; 
-                            active_intermittence_rule.mask_e = mE; 
+                            active_intermittence_rule.mask_d = mD;
+                            active_intermittence_rule.mask_e = mE;
                             active_intermittence_rule.mask_f = mF;
                             break;
                         }
                     }
                 }
             }
-            
             apply_light_outputs();
             break;
 
@@ -292,8 +287,17 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                 LATD = 0x00; LATE = 0x00; LATF = 0x00; LATH = 0x00; LATJ = 0x00;
             }
             break;
+        
+        case STATE_MANUAL_FLASH:
+            if (blink_phase_on) {
+                LATD = manual_flash_ports[0]; LATE = manual_flash_ports[1]; LATF = manual_flash_ports[2]; LATH = manual_flash_ports[3]; LATJ = manual_flash_ports[4];
+            } else {
+                LATD = 0; LATE = 0; LATF = 0; LATH = 0; LATJ = 0;
+            }
+            break;
 
         case STATE_INACTIVE:
+            // No hacer nada
             break;
     }
 }
