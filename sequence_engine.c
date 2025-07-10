@@ -189,12 +189,14 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                 movement_countdown_s--;
             }
 
-            // =================================================================
-            // <<< INICIO DE LA CORRECCIÓN >>>
-            // =================================================================
             if (movement_countdown_s == 0) {
                 
-                // --- PASO 1: Cargar y configurar el MOVIMIENTO ACTUAL ---
+                // =================================================================
+                // <<< INICIO DE LA LÓGICA CORREGIDA >>>
+                // =================================================================
+
+                // PASO 1: Cargar y configurar el MOVIMIENTO ACTUAL.
+                // Esta lógica se ejecuta primero para asegurar que la secuencia siempre inicie.
                 if (active_sequence.num_movements == 0) {
                     engine_state = STATE_FALLBACK_MODE;
                     break;
@@ -210,6 +212,7 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                 movement_countdown_s = (current_time_selector < 5) ? times[current_time_selector] : 1;
                 if (movement_countdown_s == 0) movement_countdown_s = 1;
 
+                // Lógica de intermitencia
                 active_intermittence_rule.active = false;
                 if (running_plan_id != -1) {
                     for (uint8_t i = 0; i < MAX_INTERMITENCES; i++) {
@@ -226,18 +229,10 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                     }
                 }
                 
-                // --- PASO 2: Calcular el ÍNDICE DEL SIGUIENTE PASO ---
-                // Esta lógica se ejecuta ahora, después de haber cargado el paso actual.
-                if (plan_change_pending && active_sequence.movement_indices[active_sequence_step] == active_sequence_anchor_mov) {
-                    if (running_plan_id == 0) {
-                        Sequence_Engine_RunStartupSequence();
-                    }
-                    Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
-                    break; 
-                }
-
+                // PASO 2: Calcular el ÍNDICE DEL SIGUIENTE PASO.
                 uint8_t next_step_index = (active_sequence_step + 1) % active_sequence.num_movements;
 
+                // PASO 3: Procesar reglas de flujo si la secuencia es BAJO DEMANDA.
                 if (active_sequence_type == SEQUENCE_TYPE_DEMAND) {
                     bool decision_point_was_evaluated = false;
                     for (uint8_t i = 0; i < MAX_FLOW_CONTROL_RULES; i++) {
@@ -245,7 +240,7 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                         uint8_t r_sec, r_orig, r_type, r_mask, r_dest;
                         EEPROM_ReadFlowRule(i, &r_sec, &r_orig, &r_type, &r_mask, &r_dest);
 
-                        if (r_sec == active_sequence_id && r_orig == active_sequence.movement_indices[active_sequence_step]) {
+                        if (r_sec == active_sequence_id && r_orig == mov_idx_to_run) {
                             if (r_type == RULE_TYPE_GOTO) {
                                 next_step_index = r_dest;
                             } else if (r_type == RULE_TYPE_DECISION_POINT) {
@@ -269,15 +264,42 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                     }
                 }
 
-                // --- PASO 3: Actualizar el paso actual para la SIGUIENTE iteración ---
+                // PASO 4: Lógica de Transición de Plan.
+                bool can_transition = false;
+                if (plan_change_pending) {
+                    if (active_sequence_type == SEQUENCE_TYPE_AUTOMATIC) {
+                        // Transición si el paso que acaba de terminar era el último.
+                        if (active_sequence_step == 0) {
+                            can_transition = true;
+                        }
+                    } 
+                    else if (active_sequence_type == SEQUENCE_TYPE_DEMAND) {
+                        // Transición si el paso que acaba de terminar era el ancla.
+                        if (mov_idx_to_run == active_sequence_anchor_mov) {
+                            can_transition = true;
+                        }
+                    }
+                }
+
+                if (can_transition) {
+                    if (running_plan_id == 0) {
+                        Sequence_Engine_RunStartupSequence();
+                    }
+                    Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
+                    break; // Salimos para reiniciar el ciclo con el nuevo plan.
+                }
+
+                // PASO 5: Actualizar el paso para la SIGUIENTE iteración.
                 active_sequence_step = next_step_index;
+                
+                // =================================================================
+                // <<< FIN DE LA LÓGICA CORREGIDA >>>
+                // =================================================================
             }
-            // =================================================================
-            // <<< FIN DE LA CORRECCIÓN >>>
-            // =================================================================
             
             apply_light_outputs();
             break;
+
 
         case STATE_FALLBACK_MODE:
             if (plan_change_pending) {
