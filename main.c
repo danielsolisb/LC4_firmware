@@ -27,16 +27,6 @@ static bool g_manual_flash_active = false;
 // <<< AJUSTE SUTIL: Reducimos el tiempo de debounce para una sensación más instantánea >>>
 #define DEBOUNCE_TICKS 2 // Necesitamos 2 ticks (20ms) de estado estable para confirmar.
 
-// <<< LÓGICA MEJORADA: Más simple y enfocada en el "enganche" (latching) >>>
-// Estados para nuestra máquina de antirrebote
-typedef enum {
-    STATE_RELEASED,  // El botón está liberado, esperando un flanco de subida.
-    STATE_DEBOUNCING,// Se detectó un cambio, esperando a que se estabilice.
-    STATE_PRESSED   // El botón está presionado, esperando ser liberado.
-} InputState_t;
-
-static InputState_t input_state[4] = {STATE_RELEASED, STATE_RELEASED, STATE_RELEASED, STATE_RELEASED};
-static uint8_t debounce_counter[4] = {0, 0, 0, 0};
 
 
 // =============================================================================
@@ -49,56 +39,6 @@ void Demands_ClearAll(void) {
     }
 }
 
-/**
- * @brief Escanea las entradas de demanda con una máquina de estados de enganche.
- * @details Detecta el flanco de subida (press), activa la bandera UNA SOLA VEZ,
- * y no permite reactivarla hasta que el botón sea liberado.
- */
-void Inputs_ScanTask(void) {
-    bool raw_inputs[4];
-    raw_inputs[0] = (P1 == 1);
-    raw_inputs[1] = (P2 == 1);
-    raw_inputs[2] = (P3 == 1);
-    raw_inputs[3] = (P4 == 1);
-
-    for (uint8_t i = 0; i < 4; i++) {
-        switch (input_state[i]) {
-            case STATE_RELEASED:
-                // Si estamos en reposo y se detecta una pulsación...
-                if (raw_inputs[i] == true) {
-                    input_state[i] = STATE_DEBOUNCING; // ...pasamos a la fase de antirrebote.
-                    debounce_counter[i] = 0;
-                }
-                break;
-
-            case STATE_DEBOUNCING:
-                if (raw_inputs[i] == true) {
-                    debounce_counter[i]++;
-                    if (debounce_counter[i] >= DEBOUNCE_TICKS) {
-                        // <<< ¡LÓGICA CLAVE! >>>
-                        // El botón está confirmado como presionado.
-                        // Activamos la bandera y pasamos al estado PRESSED.
-                        g_demand_flags[i] = true;
-                        input_state[i] = STATE_PRESSED;
-                    }
-                } else {
-                    // Si fue ruido, volvemos al estado inicial sin hacer nada.
-                    input_state[i] = STATE_RELEASED;
-                }
-                break;
-
-            case STATE_PRESSED:
-                // Mientras el botón esté presionado, nos quedamos aquí.
-                // La bandera ya está en 'true' y no la volvemos a tocar.
-                // Solo cuando se libera, volvemos al estado inicial para
-                // poder detectar la *próxima* pulsación.
-                if (raw_inputs[i] == false) {
-                    input_state[i] = STATE_RELEASED;
-                }
-                break;
-        }
-    }
-}
 
 static void HandleManualFlashSwitch(void) {
     static uint8_t press_counter = 0;
