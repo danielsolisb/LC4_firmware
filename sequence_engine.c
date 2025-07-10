@@ -60,6 +60,8 @@ static uint8_t pending_time_sel;
 static int8_t pending_plan_id;
 static int8_t running_plan_id = -1;
 
+static uint8_t active_sequence_anchor_step;
+
 // Prototipos de funciones internas
 static void apply_light_outputs(void);
 static void Safe_Delay_ms(uint16_t ms);
@@ -135,21 +137,20 @@ void Sequence_Engine_Start(uint8_t sec_index, uint8_t time_sel, int8_t plan_id) 
         return;
     }
 
-    // Almacenamos el ID de la secuencia que vamos a correr
     active_sequence_id = sec_index;
 
-    // Leemos todos los datos de la secuencia, incluyendo el tipo y el ancla
+    // Leemos todos los datos de la secuencia, incluyendo la POSICIÓN del ancla
     EEPROM_ReadSequence(sec_index,
                         &active_sequence_type,
-                        &active_sequence_anchor_mov,
+                        &active_sequence_anchor_step, // Se guarda la POSICIÓN del ancla
                         &active_sequence.num_movements,
                         active_sequence.movement_indices);
 
     if (active_sequence.num_movements > 0 && active_sequence.num_movements <= 12) {
         engine_state = STATE_RUNNING_SEQUENCE;
         current_time_selector = time_sel;
-        active_sequence_step = 0; // Empezamos en el primer movimiento
-        movement_countdown_s = 0; // Forzamos la carga inmediata del primer movimiento
+        active_sequence_step = 0;
+        movement_countdown_s = 0;
         active_intermittence_rule.active = false;
     } else {
         engine_state = STATE_FALLBACK_MODE;
@@ -268,14 +269,15 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                 bool can_transition = false;
                 if (plan_change_pending) {
                     if (active_sequence_type == SEQUENCE_TYPE_AUTOMATIC) {
-                        // Transición si el paso que acaba de terminar era el último.
+                        // Transición si el paso que va a empezar es el primero (el ciclo terminó).
                         if (active_sequence_step == 0) {
                             can_transition = true;
                         }
                     } 
                     else if (active_sequence_type == SEQUENCE_TYPE_DEMAND) {
-                        // Transición si el paso que acaba de terminar era el ancla.
-                        if (mov_idx_to_run == active_sequence_anchor_mov) {
+                        // Transición si el paso que acaba de terminar era el paso ancla.
+                        // Comparamos POSICIÓN con POSICIÓN.
+                        if (active_sequence_step == active_sequence_anchor_step) {
                             can_transition = true;
                         }
                     }

@@ -332,11 +332,10 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         }
         
         case 0x30: { // Guardar Secuencia
-            // La trama ahora debe tener 16 bytes de payload:
-            // 1(idx) + 1(tipo) + 1(ancla) + 1(num_mov) + 12(índices)
+            // Payload: 1(idx) + 1(tipo) + 1(pos_ancla) + 1(num_mov) + 12(índices) = 16 bytes
             if (len != 16) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             
-            // La llamada a la función ya era correcta
+            // buffer[4] ahora es la POSICIÓN del ancla (0-11)
             EEPROM_SaveSequence(buffer[2], buffer[3], buffer[4], buffer[5], &buffer[6]);
             Scheduler_ReloadCache();
             UART_Send_ACK(cmd);
@@ -347,18 +346,18 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t sec_index = buffer[2];
             
-            // Variables para recibir los nuevos datos
-            uint8_t type, anchor_mov_index, num_movements;
+            // Variables para recibir los datos
+            uint8_t type, anchor_step_index, num_movements;
             uint8_t movements_indices[12];
 
-            // Llamada a la función corregida
-            EEPROM_ReadSequence(sec_index, &type, &anchor_mov_index, &num_movements, movements_indices);
+            // Llamada a la función actualizada
+            EEPROM_ReadSequence(sec_index, &type, &anchor_step_index, &num_movements, movements_indices);
 
             if(num_movements == 0){
                 UART1_SendString("Secuencia no existe o esta vacia\r\n");
             } else {
-                // Mensaje de respuesta actualizado para mostrar todos los datos
-                sprintf(uart_response_buffer, "Sec[%d]: TIPO:%d ANCLA:%d MOV:", sec_index, type, anchor_mov_index);
+                // Mensaje de respuesta actualizado para mostrar la POSICIÓN del ancla
+                sprintf(uart_response_buffer, "Sec[%d]: TIPO:%d ANCLA_POS:%d MOV:", sec_index, type, anchor_step_index);
                 UART1_SendString(uart_response_buffer);
                 for(uint8_t i = 0; i < num_movements; i++){
                     sprintf(uart_response_buffer, "%d ", movements_indices[i]);

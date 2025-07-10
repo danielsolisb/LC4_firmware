@@ -141,15 +141,17 @@ bool EEPROM_IsMovementValid(uint8_t portD, uint8_t portE, uint8_t portF, uint8_t
 }
 
 // --- Tabla de Secuencias ---
-// Cada secuencia ocupa 13 bytes:
-// Byte 0: Número de pasos (n) de la secuencia (máx. 12)
-// Bytes 1 a 12: Lista de índices de pasos (si n < 12, se pueden rellenar con 0xFF)
-void EEPROM_SaveSequence(uint8_t sec_index, uint8_t type, uint8_t anchor_mov_index, uint8_t num_movements, uint8_t *movements_indices) {
+// Cada secuencia ocupa 15 bytes:
+// Byte 0: Tipo de secuencia
+// Byte 1: Posición del paso ancla (0-11)
+// Byte 2: Número de movimientos (n)
+// Bytes 3 a 14: Índices de los movimientos
+void EEPROM_SaveSequence(uint8_t sec_index, uint8_t type, uint8_t anchor_step_index, uint8_t num_movements, uint8_t *movements_indices) {
     uint16_t addr = EEPROM_BASE_SEQUENCES + (sec_index * SEQUENCE_SIZE);
 
-    EEPROM_Write(addr,     type);             // Guardar tipo en offset +0
-    EEPROM_Write(addr + 1, anchor_mov_index);  // Guardar ancla en offset +1
-    EEPROM_Write(addr + 2, num_movements);     // Guardar num_mov en offset +2
+    EEPROM_Write(addr,     type);              // Guardar tipo en offset +0
+    EEPROM_Write(addr + 1, anchor_step_index); // Guardar POSICIÓN del ancla en offset +1
+    EEPROM_Write(addr + 2, num_movements);      // Guardar num_mov en offset +2
 
     // Escribir los 12 bytes de los índices de movimiento (offset +3)
     for(uint8_t i = 0; i < 12; i++){
@@ -157,12 +159,12 @@ void EEPROM_SaveSequence(uint8_t sec_index, uint8_t type, uint8_t anchor_mov_ind
     }
 }
 
-void EEPROM_ReadSequence(uint8_t sec_index, uint8_t *type, uint8_t *anchor_mov_index, uint8_t *num_movements, uint8_t *movements_indices) {
+void EEPROM_ReadSequence(uint8_t sec_index, uint8_t *type, uint8_t *anchor_step_index, uint8_t *num_movements, uint8_t *movements_indices) {
     uint16_t addr = EEPROM_BASE_SEQUENCES + (sec_index * SEQUENCE_SIZE);
 
-    *type = EEPROM_Read(addr);                 // Leer tipo desde offset +0
-    *anchor_mov_index = EEPROM_Read(addr + 1); // Leer ancla desde offset +1
-    *num_movements = EEPROM_Read(addr + 2);    // Leer num_mov desde offset +2
+    *type = EEPROM_Read(addr);                  // Leer tipo desde offset +0
+    *anchor_step_index = EEPROM_Read(addr + 1); // Leer POSICIÓN del ancla desde offset +1
+    *num_movements = EEPROM_Read(addr + 2);     // Leer num_mov desde offset +2
 
     if((*num_movements == 0xFF) || (*num_movements > 12)){
         *num_movements = 0;
@@ -174,7 +176,6 @@ void EEPROM_ReadSequence(uint8_t sec_index, uint8_t *type, uint8_t *anchor_mov_i
         movements_indices[i] = EEPROM_Read(addr + 3 + i);
     }
 }
-
 // --- Tabla de Planes ---
 // Cada plan ocupa 5 bytes, con la siguiente estructura:
 //  Byte 0: sec_index (índice de secuencia a usar, 0?4)

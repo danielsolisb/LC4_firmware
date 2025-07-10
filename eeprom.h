@@ -74,8 +74,8 @@ void EEPROM_ReadMovement(uint8_t index, uint8_t *portD, uint8_t *portE, uint8_t 
 bool EEPROM_IsMovementValid(uint8_t portD, uint8_t portE, uint8_t portF, uint8_t portH, uint8_t portJ, uint8_t *times);
 
 // MODIFICADAS: Añadido 'type' y 'anchor_mov_index'
-void EEPROM_SaveSequence(uint8_t sec_index, uint8_t type, uint8_t anchor_mov_index, uint8_t num_movements, uint8_t *movements_indices);
-void EEPROM_ReadSequence(uint8_t sec_index, uint8_t *type, uint8_t *anchor_mov_index, uint8_t *num_movements, uint8_t *movements_indices);
+void EEPROM_SaveSequence(uint8_t sec_index, uint8_t type, uint8_t anchor_step_index, uint8_t num_movements, uint8_t *movements_indices);
+void EEPROM_ReadSequence(uint8_t sec_index, uint8_t *type, uint8_t *anchor_step_index, uint8_t *num_movements, uint8_t *movements_indices);
 
 void EEPROM_SavePlan(uint8_t plan_index, uint8_t id_tipo_dia, uint8_t sec_index, uint8_t time_sel, uint8_t hour, uint8_t minute);
 void EEPROM_ReadPlan(uint8_t plan_index, uint8_t *id_tipo_dia, uint8_t *sec_index, uint8_t *time_sel, uint8_t *hour, uint8_t *minute);
