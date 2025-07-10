@@ -189,63 +189,16 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                 movement_countdown_s--;
             }
 
+            // =================================================================
+            // <<< INICIO DE LA CORRECCIÓN >>>
+            // =================================================================
             if (movement_countdown_s == 0) {
-                if (plan_change_pending && active_sequence.movement_indices[active_sequence_step] == active_sequence_anchor_mov) {
-                    if (running_plan_id == 0) {
-                        Sequence_Engine_RunStartupSequence();
-                    }
-                    Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
-                    break;
-                }
-
-                uint8_t next_step_index = (active_sequence_step + 1) % active_sequence.num_movements;
-
-                // --- LÓGICA DE DEMANDA CORREGIDA ---
-                // <<< INICIO DE LA LÓGICA DE DEMANDA CORREGIDA >>>
-                if (active_sequence_type == SEQUENCE_TYPE_DEMAND) {
-                    bool decision_point_was_evaluated = false; // Flag para saber si procesamos una regla de decisión
-
-                    for (uint8_t i = 0; i < MAX_FLOW_CONTROL_RULES; i++) {
-                        CLRWDT();
-                        uint8_t r_sec, r_orig, r_type, r_mask, r_dest;
-                        EEPROM_ReadFlowRule(i, &r_sec, &r_orig, &r_type, &r_mask, &r_dest);
-
-                        // ¿La regla aplica a la secuencia y movimiento actual?
-                        if (r_sec == active_sequence_id && r_orig == active_sequence.movement_indices[active_sequence_step]) {
-                            if (r_type == RULE_TYPE_GOTO) {
-                                next_step_index = r_dest;
-                            } else if (r_type == RULE_TYPE_DECISION_POINT) {
-                                decision_point_was_evaluated = true; // Marcamos que este paso fue un punto de decisión
-                                bool condition_met = false;
-                                for(uint8_t j = 0; j < 4; j++) {
-                                    // Si la regla usa esta demanda Y la bandera de esa demanda está activa...
-                                    if ((r_mask & (1 << j)) && (g_demand_flags[j] == true)) {
-                                        condition_met = true;
-                                        break; // Encontramos una demanda, no necesitamos seguir buscando
-                                    }
-                                }
-                                if (condition_met) {
-                                    next_step_index = r_dest; // Si se cumplió la condición, saltamos
-                                }
-                            }
-                            break; // Encontramos la regla para este paso, salimos del bucle
-                        }
-                    }
-
-                    // Limpiamos las banderas SOLO SI el paso que acaba de terminar era un punto de decisión
-                    if (decision_point_was_evaluated) {
-                        Demands_ClearAll();
-                    }
-                }
-                // <<< FIN DE LA LÓGICA DE DEMANDA CORREGIDA >>>
-
-                active_sequence_step = next_step_index;
-
+                
+                // --- PASO 1: Cargar y configurar el MOVIMIENTO ACTUAL ---
                 if (active_sequence.num_movements == 0) {
                     engine_state = STATE_FALLBACK_MODE;
                     break;
                 }
-
                 uint8_t mov_idx_to_run = active_sequence.movement_indices[active_sequence_step];
                 if (mov_idx_to_run >= MAX_MOVEMENTS) {
                     engine_state = STATE_FALLBACK_MODE;
@@ -272,7 +225,57 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                         }
                     }
                 }
+                
+                // --- PASO 2: Calcular el ÍNDICE DEL SIGUIENTE PASO ---
+                // Esta lógica se ejecuta ahora, después de haber cargado el paso actual.
+                if (plan_change_pending && active_sequence.movement_indices[active_sequence_step] == active_sequence_anchor_mov) {
+                    if (running_plan_id == 0) {
+                        Sequence_Engine_RunStartupSequence();
+                    }
+                    Sequence_Engine_Start(pending_sec_index, pending_time_sel, pending_plan_id);
+                    break; 
+                }
+
+                uint8_t next_step_index = (active_sequence_step + 1) % active_sequence.num_movements;
+
+                if (active_sequence_type == SEQUENCE_TYPE_DEMAND) {
+                    bool decision_point_was_evaluated = false;
+                    for (uint8_t i = 0; i < MAX_FLOW_CONTROL_RULES; i++) {
+                        CLRWDT();
+                        uint8_t r_sec, r_orig, r_type, r_mask, r_dest;
+                        EEPROM_ReadFlowRule(i, &r_sec, &r_orig, &r_type, &r_mask, &r_dest);
+
+                        if (r_sec == active_sequence_id && r_orig == active_sequence.movement_indices[active_sequence_step]) {
+                            if (r_type == RULE_TYPE_GOTO) {
+                                next_step_index = r_dest;
+                            } else if (r_type == RULE_TYPE_DECISION_POINT) {
+                                decision_point_was_evaluated = true;
+                                bool condition_met = false;
+                                for(uint8_t j = 0; j < 4; j++) {
+                                    if ((r_mask & (1 << j)) && (g_demand_flags[j] == true)) {
+                                        condition_met = true;
+                                        break;
+                                    }
+                                }
+                                if (condition_met) {
+                                    next_step_index = r_dest;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    if (decision_point_was_evaluated) {
+                        Demands_ClearAll();
+                    }
+                }
+
+                // --- PASO 3: Actualizar el paso actual para la SIGUIENTE iteración ---
+                active_sequence_step = next_step_index;
             }
+            // =================================================================
+            // <<< FIN DE LA CORRECCIÓN >>>
+            // =================================================================
+            
             apply_light_outputs();
             break;
 
