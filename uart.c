@@ -23,6 +23,9 @@ static volatile bool g_frame_received = false;
 // Prototipo de la función que construye y envía una trama
 static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
 
+// Prototipo de la función que construye y envía una trama
+static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
+
 #define UART_RESPONSE_BUFFER_SIZE 128
 static char uart_response_buffer[UART_RESPONSE_BUFFER_SIZE];
 
@@ -80,6 +83,22 @@ void UART_Send_NACK(uint8_t original_cmd, uint8_t error_code) {
     payload[0] = original_cmd;
     payload[1] = error_code;
     UART_Send_Frame(CMD_NACK, payload, 2);
+}
+
+//funci+on para monitoreo y reporte
+void UART_Send_Monitoring_Report(uint8_t portD, uint8_t portE, uint8_t portF, uint8_t portH, uint8_t portJ) {
+    uint8_t payload[5];
+    
+    // Construir el byte de estado peatonal combinando los 4 bits inferiores de H y J
+    uint8_t pedestrian_status = (portH & 0x0F) | ((portJ & 0x0F) << 4);
+
+    payload[0] = EEPROM_ReadControllerID();
+    payload[1] = portD;
+    payload[2] = portE;
+    payload[3] = portF;
+    payload[4] = pedestrian_status;
+    
+    UART_Send_Frame(CMD_MONITOR_STATUS_REPORT, payload, 5);
 }
 
 /**
@@ -506,6 +525,20 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             Sequence_Engine_EnterFallback();
             
             // --- FIN DE LA CORRECCIÓN ---
+            break;
+        }
+        
+        case CMD_MONITOR_ENABLE: { // 0x80
+            if (len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            g_monitoring_active = true;
+            UART_Send_ACK(cmd);
+            break;
+        }
+
+        case CMD_MONITOR_DISABLE: { // 0x81
+            if (len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            g_monitoring_active = false;
+            UART_Send_ACK(cmd);
             break;
         }
         

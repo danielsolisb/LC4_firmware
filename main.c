@@ -1,6 +1,7 @@
 // main.c
 // Autor: Daniel Solis
 // fecha 11/07/2025
+//monitoreo agregado
 #include <xc.h>
 #include "config.h"
 #include "uart.h"
@@ -17,6 +18,7 @@
 volatile bool g_system_ready = false;
 void Inputs_ScanTask(void);
 volatile bool g_demand_flags[4] = {false, false, false, false};
+volatile bool g_monitoring_active = false; 
 
 // --- LÓGICA PARA EL SWITCH DE MANTENIMIENTO ---
 #define MANUAL_FLASH_PIN PORTJbits.RJ5

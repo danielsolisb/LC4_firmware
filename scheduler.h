@@ -11,6 +11,7 @@
 // 'extern' indica que están definidas en otro archivo (main.c).
 extern volatile bool g_demand_flags[4];
 
+extern volatile bool g_monitoring_active;
 // --- FUNCIONES DE GESTIÓN DE DEMANDAS ---
 /**
  * @brief Pone a cero todas las banderas de demanda.

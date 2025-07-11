@@ -5,6 +5,7 @@
 #include "config.h"
 #include <xc.h>
 #include "scheduler.h"
+#include "uart.h"      // Necesario para la función de reporte
 
 // --- REFERENCIA A FUNCIÓN EXTERNA ---
 // Hacemos que este módulo conozca la función para limpiar las banderas de demanda.
@@ -212,7 +213,16 @@ void Sequence_Engine_Run(bool half_second_tick, bool one_second_tick) {
                 EEPROM_ReadMovement(mov_idx_to_run, &current_mov_ports[0], &current_mov_ports[1], &current_mov_ports[2], &current_mov_ports[3], &current_mov_ports[4], times);
                 movement_countdown_s = (current_time_selector < 5) ? times[current_time_selector] : 1;
                 if (movement_countdown_s == 0) movement_countdown_s = 1;
-
+                
+                // Si el monitoreo está activo, enviar el reporte de estado AHORA.
+                if (g_monitoring_active) {
+                    UART_Send_Monitoring_Report(current_mov_ports[0], 
+                                                current_mov_ports[1], 
+                                                current_mov_ports[2], 
+                                                current_mov_ports[3], 
+                                                current_mov_ports[4]);
+                }
+                
                 // Lógica de intermitencia
                 active_intermittence_rule.active = false;
                 if (running_plan_id != -1) {

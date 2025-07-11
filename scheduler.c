@@ -9,6 +9,7 @@
 
 // --- Variables Globales y Estáticas ---
 volatile bool g_rtc_access_in_progress = false;
+
 static Plan g_plan_cache[MAX_PLANS];
 // Esta variable ahora representa el plan que el scheduler *ha solicitado*.
 // No es necesariamente el que está corriendo en el motor.

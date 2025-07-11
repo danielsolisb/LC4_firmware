@@ -19,6 +19,11 @@
 #define ERROR_INVALID_DATA 0x04
 #define ERROR_EXECUTION_FAIL 0x05
 
+// <<< NUEVOS COMANDOS PARA MONITOREO >>>
+#define CMD_MONITOR_ENABLE 0x80
+#define CMD_MONITOR_DISABLE 0x81
+#define CMD_MONITOR_STATUS_REPORT 0x82
+
 // --- Prototipos de las nuevas funciones de respuesta ---
 void UART_Send_ACK(uint8_t original_cmd);
 void UART_Send_NACK(uint8_t original_cmd, uint8_t error_code);
@@ -28,7 +33,7 @@ void UART1_Init(uint32_t baudrate);
 void UART2_Init(uint32_t baudrate);
 void UART1_SendString(const char *str); // Ahora es no bloqueante
 void UART_Task(void);                   // Tarea de procesamiento para el bucle principal
-
+void UART_Send_Monitoring_Report(uint8_t portD, uint8_t portE, uint8_t portF, uint8_t portH, uint8_t portJ);
 // =============================================================================
 // --- PROTOTIPOS PARA LA ISR (LA CORRECCIÓN ESTÁ AQUÍ) ---
 // =============================================================================
