@@ -24,6 +24,17 @@
 #define CMD_MONITOR_DISABLE 0x81
 #define CMD_MONITOR_STATUS_REPORT 0x82
 
+// --- Definiciones para los Comandos de Respuesta de Datos ---
+// Se sigue la convención de que una respuesta a un comando CMD es (CMD | 0x80)
+#define RESP_CONTROLLER_ID 0x91 // Respuesta a 0x11
+#define RESP_RTC_TIME      0xA1 // Respuesta a 0x21
+#define RESP_MOVEMENT_DATA 0xA4 // Respuesta a 0x24
+#define RESP_SEQUENCE_DATA 0xB1 // Respuesta a 0x31
+#define RESP_PLAN_DATA     0xC1 // Respuesta a 0x41
+#define RESP_INTERMIT_DATA 0xD1 // Respuesta a 0x51
+#define RESP_HOLIDAY_DATA  0xE1 // Respuesta a 0x61
+#define RESP_FLOW_RULE_DATA 0xF1 // Respuesta a 0x71
+
 // --- Prototipos de las nuevas funciones de respuesta ---
 void UART_Send_ACK(uint8_t original_cmd);
 void UART_Send_NACK(uint8_t original_cmd, uint8_t error_code);

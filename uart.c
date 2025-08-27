@@ -27,7 +27,7 @@ static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
 static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
 
 #define UART_RESPONSE_BUFFER_SIZE 128
-static char uart_response_buffer[UART_RESPONSE_BUFFER_SIZE];
+//static char uart_response_buffer[UART_RESPONSE_BUFFER_SIZE];
 
 static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length);
 
@@ -238,30 +238,36 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         case 0x11: { // Leer ID de controlador
             if(len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t id = EEPROM_ReadControllerID();
-            //char msg[64];
-            sprintf(uart_response_buffer, "ID:%02X\r\n", id);
-            UART1_SendString(uart_response_buffer);
+            
+            // Se construye el payload con el dato leído
+            uint8_t payload[1];
+            payload[0] = id;
+            
+            // Se envía la trama de respuesta binaria, no texto.
+            UART_Send_Frame(RESP_CONTROLLER_ID, payload, 1);
             break;
         }
-        // ... Aquí irían todos tus otros case para EEPROM: 0x23, 0x24, 0x30, etc. ...
-
 
         // --- Comandos de RTC (requieren bloqueo con semáforo) ---
         case 0x21: { // Consultar Hora
             if(len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             
-            g_rtc_access_in_progress = true; // <<-- BLOQUEAR ACCESO
-            
+            g_rtc_access_in_progress = true;
             RTC_Time rtc;
             RTC_GetTime(&rtc);
+            g_rtc_access_in_progress = false;
             
-            // Usamos el buffer estático que definimos para evitar problemas de memoria
-            sprintf(uart_response_buffer, "Hora: %02d:%02d:%02d - Fecha: %02d/%02d/%02d (DoW: %d)\r\n", 
-                    rtc.hour, rtc.minute, rtc.second, rtc.day, rtc.month, rtc.year, rtc.dayOfWeek);
-            
-            UART1_SendString(uart_response_buffer);
-            
-            g_rtc_access_in_progress = false; // <<-- LIBERAR ACCESO
+            // El payload contiene los 7 bytes de la estructura RTC_Time
+            uint8_t payload[7];
+            payload[0] = rtc.hour;
+            payload[1] = rtc.minute;
+            payload[2] = rtc.second;
+            payload[3] = rtc.day;
+            payload[4] = rtc.month;
+            payload[5] = rtc.year;
+            payload[6] = rtc.dayOfWeek;
+
+            UART_Send_Frame(RESP_RTC_TIME, payload, 7);
             break;
         }
         
@@ -300,24 +306,26 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         case 0x24: { // Leer Movimiento
             if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t index = buffer[2];
-    
-            // <<< PASO 1: Declarar las variables para los nuevos puertos H y J
             uint8_t portD, portE, portF, portH, portJ; 
             uint8_t times[5];
     
-            // <<< PASO 2: Pasar las direcciones de H y J a la función
             EEPROM_ReadMovement(index, &portD, &portE, &portF, &portH, &portJ, times);
     
-            // <<< PASO 3: Pasar los valores de H y J a la función de validación
+            // Se comprueba si el movimiento es válido. Si no lo es, se envía un NACK.
             if(!EEPROM_IsMovementValid(portD, portE, portF, portH, portJ, times)){
-                UART1_SendString("Movimiento no existe o esta vacio\r\n");
+                UART_Send_NACK(cmd, ERROR_INVALID_DATA);
             } else {
-                // La cadena de respuesta ya estaba correcta, se mantiene igual
-                //char msg[120]; 
-                sprintf(uart_response_buffer, "Movimiento[%d]: D:%02X E:%02X F:%02X H:%02X J:%02X T:[%02X %02X %02X %02X %02X]\r\n",
-                        index, portD, portE, portF, portH, portJ,
-                        times[0], times[1], times[2], times[3], times[4]);
-                UART1_SendString(uart_response_buffer);
+                // Si es válido, se construye el payload con los datos binarios.
+                uint8_t payload[11];
+                payload[0] = index; // Se devuelve el índice para confirmación
+                payload[1] = portD;
+                payload[2] = portE;
+                payload[3] = portF;
+                payload[4] = portH;
+                payload[5] = portJ;
+                for(uint8_t i = 0; i < 5; i++) payload[6+i] = times[i];
+                
+                UART_Send_Frame(RESP_MOVEMENT_DATA, payload, 11);
             }
             break;
         }
@@ -374,25 +382,27 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         case 0x31: { // Leer Secuencia
             if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t sec_index = buffer[2];
-            
-            // Variables para recibir los datos
             uint8_t type, anchor_step_index, num_movements;
             uint8_t movements_indices[12];
 
-            // Llamada a la función actualizada
             EEPROM_ReadSequence(sec_index, &type, &anchor_step_index, &num_movements, movements_indices);
 
+            // Si no hay movimientos, se considera dato inválido y se envía NACK.
             if(num_movements == 0){
-                UART1_SendString("Secuencia no existe o esta vacia\r\n");
+                UART_Send_NACK(cmd, ERROR_INVALID_DATA);
             } else {
-                // Mensaje de respuesta actualizado para mostrar la POSICIÓN del ancla
-                sprintf(uart_response_buffer, "Sec[%d]: TIPO:%d ANCLA_POS:%d MOV:", sec_index, type, anchor_step_index);
-                UART1_SendString(uart_response_buffer);
-                for(uint8_t i = 0; i < num_movements; i++){
-                    sprintf(uart_response_buffer, "%d ", movements_indices[i]);
-                    UART1_SendString(uart_response_buffer);
+                // Se construye un payload de tamaño fijo (16 bytes).
+                uint8_t payload[16];
+                payload[0] = sec_index;
+                payload[1] = type;
+                payload[2] = anchor_step_index;
+                payload[3] = num_movements;
+                for(uint8_t i = 0; i < 12; i++){
+                    // Se rellenan los índices usados y el resto con 0xFF.
+                    payload[4+i] = (i < num_movements) ? movements_indices[i] : 0xFF;
                 }
-                UART1_SendString("\r\n");
+                
+                UART_Send_Frame(RESP_SEQUENCE_DATA, payload, 16);
             }
             break;
         }
@@ -414,26 +424,26 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
         
-        // NUEVA FUNCIONALIDAD: Leer un Plan (CMD 0x41)
-        case 0x41: {
-            // Payload esperado: 1 byte: [plan_index]
+        case 0x41: { // Leer Plan
             if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t plan_index = buffer[2];
-
-            // <<< PASO 1: Renombrar 'day' a 'id_tipo_dia' y ajustar el orden
             uint8_t id_tipo_dia, sec_index, time_sel, hour, minute;
 
-            // <<< PASO 2: Llamar a la función con el orden correcto de argumentos
-            // La firma es: EEPROM_ReadPlan(index, *id_tipo_dia, *sec_index, *time_sel, *hour, *minute)
             EEPROM_ReadPlan(plan_index, &id_tipo_dia, &sec_index, &time_sel, &hour, &minute);
-    
-            //char msg[100];
-
-            // <<< PASO 3: Actualizar el mensaje para que sea claro y correcto
-            sprintf(uart_response_buffer, "Plan[%d]: TipoDia:%d, Sec:%d, Tsel:%d, Hora:%d, Min:%d\r\n", 
-                    plan_index, id_tipo_dia, sec_index, time_sel, hour, minute);
             
-            UART1_SendString(uart_response_buffer);
+            // 0xFF es el valor por defecto de una EEPROM borrada.
+            if (id_tipo_dia == 0xFF) {
+                UART_Send_NACK(cmd, ERROR_INVALID_DATA);
+            } else {
+                uint8_t payload[6];
+                payload[0] = plan_index;
+                payload[1] = id_tipo_dia;
+                payload[2] = sec_index;
+                payload[3] = time_sel;
+                payload[4] = hour;
+                payload[5] = minute;
+                UART_Send_Frame(RESP_PLAN_DATA, payload, 6);
+            }
             break;
         }
         
@@ -445,21 +455,23 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         }
 
         case 0x51: { // Leer Bloque de Intermitencia
-            // Payload: slot_index(1) = 1 byte
             if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             uint8_t slot_index = buffer[2];
             uint8_t id_plan, mov_idx, mask_d, mask_e, mask_f;
 
             EEPROM_ReadIntermittence(slot_index, &id_plan, &mov_idx, &mask_d, &mask_e, &mask_f);
 
-            // Comprobamos si el bloque está vacío (todo 0xFF)
-            if (id_plan == 0xFF && mov_idx == 0xFF && mask_d == 0xFF) {
-                 UART1_SendString("Bloque de intermitencia no existe o esta vacio\r\n");
+            if (id_plan == 0xFF) {
+                 UART_Send_NACK(cmd, ERROR_INVALID_DATA);
             } else {
-                //char msg[120];
-                sprintf(uart_response_buffer, "Intermitencia[%d]: PlanID:%d MovID:%d MaskD:0x%02X MaskE:0x%02X MaskF:0x%02X\r\n",
-                        slot_index, id_plan, mov_idx, mask_d, mask_e, mask_f);
-                UART1_SendString(uart_response_buffer);
+                uint8_t payload[6];
+                payload[0] = slot_index;
+                payload[1] = id_plan;
+                payload[2] = mov_idx;
+                payload[3] = mask_d;
+                payload[4] = mask_e;
+                payload[5] = mask_f;
+                UART_Send_Frame(RESP_INTERMIT_DATA, payload, 6);
             }
             break;
         }
@@ -472,31 +484,28 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
         
-        case 0x61: { // Leer TODOS los Feriados
-            if(len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+        case 0x61: { // Leer UN Feriado
+            if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            uint8_t index = buffer[2];
             
-            UART1_SendString("--- Feriados Guardados ---\r\n");
+            // Para leer todos, el software deberá iterar desde el índice 0 hasta MAX_HOLIDAYS-1.
+            if (index >= MAX_HOLIDAYS) {
+                UART_Send_NACK(cmd, ERROR_INVALID_DATA);
+                break;
+            }
+            
             uint8_t day, month;
-            //char msg[32];
-            uint8_t encontrados = 0;
+            EEPROM_ReadHoliday(index, &day, &month);
             
-            for (uint8_t i = 0; i < MAX_HOLIDAYS; i++) {
-                EEPROM_ReadHoliday(i, &day, &month);
-                // Un slot vacío en la EEPROM usualmente lee 0xFF
-                if (day != 0xFF && month != 0xFF && day <= 31 && month <= 12) {
-                    sprintf(uart_response_buffer, "Slot[%d]: %02d/%02d\r\n", i, day, month);
-                    UART1_SendString(uart_response_buffer);
-                    encontrados++;
-                }
+            if (day == 0xFF || month == 0xFF) {
+                UART_Send_NACK(cmd, ERROR_INVALID_DATA);
+            } else {
+                uint8_t payload[3];
+                payload[0] = index;
+                payload[1] = day;
+                payload[2] = month;
+                UART_Send_Frame(RESP_HOLIDAY_DATA, payload, 3);
             }
-            
-            if (encontrados == 0) {
-                UART1_SendString("No hay feriados configurados.\r\n");
-            }
-            
-            sprintf(uart_response_buffer, "Total: %d/%d\r\n", encontrados, MAX_HOLIDAYS);
-            UART1_SendString(uart_response_buffer);
-            
             break;
         }
         
@@ -516,11 +525,16 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             EEPROM_ReadFlowRule(rule_index, &sec_idx, &orig_mov, &rule_type, &mask, &dest_mov);
 
             if (sec_idx == 0xFF) {
-                UART1_SendString("Regla de flujo no existe o esta vacia\r\n");
+                UART_Send_NACK(cmd, ERROR_INVALID_DATA);
             } else {
-                sprintf(uart_response_buffer, "Regla[%d]: Sec:%d MovOrig:%d Tipo:%d Mascara:0x%02X MovDest:%d\r\n",
-                        rule_index, sec_idx, orig_mov, rule_type, mask, dest_mov);
-                UART1_SendString(uart_response_buffer);
+                uint8_t payload[6];
+                payload[0] = rule_index;
+                payload[1] = sec_idx;
+                payload[2] = orig_mov;
+                payload[3] = rule_type;
+                payload[4] = mask;
+                payload[5] = dest_mov;
+                UART_Send_Frame(RESP_FLOW_RULE_DATA, payload, 6);
             }
             break;
         }
