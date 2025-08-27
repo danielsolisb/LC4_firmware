@@ -282,10 +282,20 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         
         case 0x23: { // Guardar Movimiento
             if (len != 11) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
-            EEPROM_SaveMovement(buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7], &buffer[8]);
+            
+            // --- INICIO DE LA CORRECCIÓN ---
+            // 1. Confirmar INMEDIATAMENTE que se recibió el comando.
             UART_Send_ACK(cmd);
+            
+            // 2. Ahora, ejecutar la operación de guardado.
+            EEPROM_SaveMovement(buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7], &buffer[8]);
+            // --- FIN DE LA CORRECCIÓN ---
+
+            // El ACK ya se envió, por lo que la siguiente línea se elimina o comenta.
+            // UART_Send_ACK(cmd); 
             break;
         }
+
         
         case 0x24: { // Leer Movimiento
             if(len != 1) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
@@ -389,9 +399,18 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
         
         case 0x40: { // Guardar Plan
             if(len != 6) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
+            
+            // --- INICIO DE LA CORRECCIÓN ---
+            // 1. Confirmar INMEDIATAMENTE que se recibió el comando.
+            UART_Send_ACK(cmd);
+
+            // 2. Ejecutar la operación de guardado y recarga de caché.
             EEPROM_SavePlan(buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
             Scheduler_ReloadCache();
-            UART_Send_ACK(cmd);
+            // --- FIN DE LA CORRECCIÓN ---
+            
+            // El ACK ya se envió, por lo que la siguiente línea se elimina o comenta.
+            // UART_Send_ACK(cmd);
             break;
         }
         
@@ -528,14 +547,14 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             break;
         }
         
-        case CMD_MONITOR_ENABLE: { // 0x80
+        case 0x80: { // 0x80
             if (len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             g_monitoring_active = true;
             UART_Send_ACK(cmd);
             break;
         }
 
-        case CMD_MONITOR_DISABLE: { // 0x81
+        case 0x81: { // 0x81
             if (len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }
             g_monitoring_active = false;
             UART_Send_ACK(cmd);
