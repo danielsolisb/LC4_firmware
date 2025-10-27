@@ -62,4 +62,15 @@ void UART_ProcessReceivedByte(uint8_t byte);
  */
 void UART_Transmit_ISR(void);
 
+/**
+ * @brief Procesa un byte recién llegado por la UART2. Llamada desde la ISR de RX.
+ * @param byte El byte leído del registro RCREG2.
+ */
+void UART2_ProcessReceivedByte(uint8_t byte);
+
+/**
+ * @brief Tarea de procesamiento para el bucle principal (UART2).
+ */
+void UART2_Task(void);
+
 #endif /* UART_H */

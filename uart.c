@@ -20,6 +20,11 @@ static volatile uint8_t uart_rx_buffer[UART_RX_BUFFER_SIZE];
 static volatile uint8_t uart_rx_index = 0;
 static volatile bool g_frame_received = false;
 
+static volatile uint8_t uart2_rx_buffer[UART_RX_BUFFER_SIZE];
+static volatile uint8_t uart2_rx_index = 0;
+static volatile bool g_uart2_frame_received = false;
+static volatile bool g_uart2_processing_lock = false;
+
 // Prototipo de la función que construye y envía una trama
 static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
 
@@ -30,6 +35,8 @@ static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
 //static char uart_response_buffer[UART_RESPONSE_BUFFER_SIZE];
 
 static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length);
+
+static void UART2_HandleCompleteFrame(uint8_t *buffer, uint8_t length);
 
 // >>> NUEVO CERROJO (LOCK) POR SOFTWARE <<<
 static volatile bool g_uart_processing_lock = false;
@@ -44,7 +51,22 @@ void UART1_Init(uint32_t baudrate) {
     PIE1bits.RC1IE = 1;
 }
 
-void UART2_Init(uint32_t baudrate) { /* No implementado */ }
+void UART2_Init(uint32_t baudrate) {
+    // Pines de UART2 en PIC18F8720: RG1 (TX2) y RG2 (RX2)
+    TRISGbits.TRISG1 = 0; // TX2 como salida
+    TRISGbits.TRISG2 = 1; // RX2 como entrada
+    
+    TXSTA2 = 0x24;        // TXEN=1 (Transmit enable), BRGH=1 (High speed)
+    RCSTA2 = 0x90;        // SPEN=1 (Serial port enable), CREN=1 (Continuous receive)
+    
+    // Cálculo de Baud Rate (igual que UART1 para 9600 baud @ 20MHz)
+    // (20,000,000 / (16 * 9600)) - 1 = 129.2
+    SPBRG2 = 129; 
+    
+    PIE3bits.RC2IE = 1; // Habilitar interrupción de recepción de UART2
+    IPR3bits.RC2IP = 1; // Asignar alta prioridad
+}
+
 
 void UART_Transmit_ISR(void) {
     if (tx_head != tx_tail) {
@@ -159,6 +181,23 @@ void UART_Task(void) {
     g_uart_processing_lock = false;
 }
 
+void UART2_Task(void) {
+    if (!g_uart2_frame_received) {
+        return;
+    }
+
+    // Ponemos el cerrojo para que la ISR no modifique el buffer de UART2.
+    g_uart2_processing_lock = true;
+
+    // Procesamos la trama directamente desde el buffer global de UART2.
+    UART2_HandleCompleteFrame((uint8_t*)uart2_rx_buffer, uart2_rx_index);
+
+    // Reseteamos la bandera de trama recibida.
+    g_uart2_frame_received = false;
+
+    // Quitamos el cerrojo para permitir que la ISR reciba nuevas tramas.
+    g_uart2_processing_lock = false;
+}
 
 // =============================================================================
 // >>> FUNCIÓN UART_ProcessReceivedByte MODIFICADA (Usa el cerrojo) <<<
@@ -204,6 +243,53 @@ void UART_ProcessReceivedByte(uint8_t byte) {
     }
 }
 
+
+/**
+ * @brief Procesa un byte de UART2 (llamada desde la ISR).
+ * @details Esta es una copia de la lógica de UART1, pero usa las variables
+ * y banderas de UART2.
+ */
+void UART2_ProcessReceivedByte(uint8_t byte) {
+    // Si el bucle principal (UART2_Task) está procesando, ignoramos.
+    if (g_uart2_processing_lock) {
+        return;
+    }
+
+    // Lógica de recepción para la MMU
+    // (Asumimos el mismo formato de trama por ahora, esto se puede cambiar)
+    static uint8_t stx_sequence[3] = {0x43, 0x53, 0x4F}; // <--- ¿Usa MMU el mismo STX?
+    static uint8_t stx_counter = 0;
+    static bool receiving_in_progress = false;
+
+    if (!receiving_in_progress) {
+        if (byte == stx_sequence[stx_counter]) {
+            if (++stx_counter >= 3) {
+                receiving_in_progress = true;
+                uart2_rx_index = 0; // Usa buffer UART2
+                stx_counter = 0;
+            }
+        } else {
+            stx_counter = 0;
+        }
+    } else {
+        if (uart2_rx_index < UART_RX_BUFFER_SIZE) {
+            uart2_rx_buffer[uart2_rx_index++] = byte; // Usa buffer UART2
+            if (uart2_rx_index >= 2) {
+                uint8_t payload_len = uart2_rx_buffer[1];
+                uint16_t total_expected_bytes = payload_len + 5;
+                if (uart2_rx_index >= total_expected_bytes) {
+                    if (uart2_rx_buffer[uart2_rx_index - 2] == 0x03 && uart2_rx_buffer[uart2_rx_index - 1] == 0xFF) {
+                        g_uart2_frame_received = true; // <--- Bandera de UART2
+                        uart2_rx_index -= 2;
+                    }
+                    receiving_in_progress = false;
+                }
+            }
+        } else {
+            receiving_in_progress = false;
+        }
+    }
+}
 
 // =============================================================================
 // --- FUNCIÓN INTERNA PARA MANEJAR TRAMAS ---
@@ -579,4 +665,26 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             UART_Send_NACK(cmd, ERROR_UNKNOWN_CMD);
             break;
     }
+}
+
+
+static void UART2_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
+    uint8_t cmd = buffer[0];
+    uint8_t len = buffer[1];
+    
+    // (Podemos añadir validación de checksum si es necesario)
+    
+    char debug_msg[64];
+    sprintf(debug_msg, "UART2: Trama recibida! CMD=0x%02X, LEN=%d\r\n", cmd, len);
+    UART1_SendString(debug_msg);
+
+    // Futura implementación:
+    // switch(cmd) {
+    //     case CMD_MMU_STATUS:
+    //         // ...
+    //         break;
+    //     case CMD_MMU_ERROR:
+    //         // ...
+    //         break;
+    // }
 }
