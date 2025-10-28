@@ -65,6 +65,10 @@ void EEPROM_InitStructure(void){
     
     // 3. Escribir la bandera de inicialización
     EEPROM_Write(0x000, 0xAA);
+    // 4. inicializa las salidas para avisar al mmu habilitadas, por default todas las salidas
+    // de trafico estan habilitadas, las peatonales no.
+    EEPROM_Write(EEPROM_MASK_VEHICULAR_ADDR, 0xFF);
+    EEPROM_Write(EEPROM_MASK_PEDONAL_ADDR, 0x00);
 }
 
 // --- ID del Controlador ---
@@ -267,4 +271,15 @@ void EEPROM_ReadFlowRule(uint8_t rule_index, uint8_t *sec_index, uint8_t *origin
     *rule_type = EEPROM_Read(addr + 2);
     *demand_mask = EEPROM_Read(addr + 3);
     *dest_mov_index = EEPROM_Read(addr + 4);
+}
+
+//Funciones para guardar y leer las salidas que seran utilizadas en la configuracion total.
+void EEPROM_SaveOutputMasks(uint8_t mask_veh, uint8_t mask_ped) {
+    EEPROM_Write(EEPROM_MASK_VEHICULAR_ADDR, mask_veh);
+    EEPROM_Write(EEPROM_MASK_PEDONAL_ADDR, mask_ped);
+}
+
+void EEPROM_ReadOutputMasks(uint8_t *mask_veh, uint8_t *mask_ped) {
+    *mask_veh = EEPROM_Read(EEPROM_MASK_VEHICULAR_ADDR);
+    *mask_ped = EEPROM_Read(EEPROM_MASK_PEDONAL_ADDR);
 }

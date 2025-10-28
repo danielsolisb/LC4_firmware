@@ -27,6 +27,10 @@
 // --- Definiciones para los Comandos de Respuesta de Datos ---
 // Se sigue la convención de que una respuesta a un comando CMD es (CMD | 0x80)
 #define RESP_CONTROLLER_ID 0x91 // Respuesta a 0x11
+//Comandos de Máscaras de Salida
+#define CMD_SAVE_OUTPUT_MASKS 0x12
+#define CMD_READ_OUTPUT_MASKS 0x13
+#define RESP_OUTPUT_MASKS_DATA 0x93 // Respuesta a 0x13
 #define RESP_RTC_TIME      0xA1 // Respuesta a 0x21
 #define RESP_MOVEMENT_DATA 0xA4 // Respuesta a 0x24
 #define RESP_SEQUENCE_DATA 0xB1 // Respuesta a 0x31

@@ -333,7 +333,37 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
             UART_Send_Frame(RESP_CONTROLLER_ID, payload, 1);
             break;
         }
+        
+        //  Manejador para Comandos de Máscaras para saber que salidas estaran trabajando
+        case CMD_SAVE_OUTPUT_MASKS: { // 0x12: Guardar Máscaras de Salida
+            if(len != 2) { 
+                UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); 
+                break; 
+            }
+            // buffer[2] = Máscara Vehicular
+            // buffer[3] = Máscara Peatonal
+            EEPROM_SaveOutputMasks(buffer[2], buffer[3]);
+            UART_Send_ACK(cmd);
+            break;
+        }
 
+        case CMD_READ_OUTPUT_MASKS: { // 0x13: Leer Máscaras de Salida
+            if(len != 0) { 
+                UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); 
+                break; 
+            }
+            
+            uint8_t mask_v, mask_p;
+            EEPROM_ReadOutputMasks(&mask_v, &mask_p);
+            
+            uint8_t payload[2];
+            payload[0] = mask_v;
+            payload[1] = mask_p;
+            
+            UART_Send_Frame(RESP_OUTPUT_MASKS_DATA, payload, 2);
+            break;
+        }
+        
         // --- Comandos de RTC (requieren bloqueo con semáforo) ---
         case 0x21: { // Consultar Hora
             if(len != 0) { UART_Send_NACK(cmd, ERROR_INVALID_LENGTH); break; }

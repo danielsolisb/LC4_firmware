@@ -55,6 +55,10 @@
 #define FLOW_CONTROL_RULE_SIZE    6
 #define MAX_FLOW_CONTROL_RULES    10
 
+// --- MAPA DE MÁSCARAS DE SALIDA --- 
+// (Ubicado en el espacio libre de 2 bytes)
+#define EEPROM_MASK_VEHICULAR_ADDR 0x3BA
+#define EEPROM_MASK_PEDONAL_ADDR   0x3BB
 
 // =============================================================================
 // --- PROTOTIPOS DE FUNCIONES (REVISADOS) ---
@@ -89,5 +93,21 @@ void EEPROM_ReadHoliday(uint8_t index, uint8_t *day, uint8_t *month);
 // --- NUEVAS FUNCIONES PARA CONTROL DE FLUJO ---
 void EEPROM_SaveFlowRule(uint8_t rule_index, uint8_t sec_index, uint8_t origin_mov_index, uint8_t rule_type, uint8_t demand_mask, uint8_t dest_mov_index);
 void EEPROM_ReadFlowRule(uint8_t rule_index, uint8_t *sec_index, uint8_t *origin_mov_index, uint8_t *rule_type, uint8_t *demand_mask, uint8_t *dest_mov_index);
+
+// FUNCIONES DE MÁSCARAS DE SALIDA --- 
+/**
+ * @brief Guarda las máscaras de habilitación de salidas vehiculares y peatonales.
+ * @param mask_veh Byte de máscara para salidas vehiculares (G1-G8).
+ * @param mask_ped Byte de máscara para salidas peatonales (P1-P8).
+ */
+void EEPROM_SaveOutputMasks(uint8_t mask_veh, uint8_t mask_ped);
+
+/**
+ * @brief Lee las máscaras de habilitación de salidas vehiculares y peatonales.
+ * @param mask_veh Puntero para almacenar la máscara vehicular.
+ * @param mask_ped Puntero para almacenar la máscara peatonal.
+ */
+void EEPROM_ReadOutputMasks(uint8_t *mask_veh, uint8_t *mask_ped);
+
 
 #endif // EEPROM_H
