@@ -20,6 +20,12 @@ static volatile uint8_t uart_rx_buffer[UART_RX_BUFFER_SIZE];
 static volatile uint8_t uart_rx_index = 0;
 static volatile bool g_frame_received = false;
 
+// <<< --- NUEVO: Buffers de transmisión y variables para UART2 --- >>>
+#define UART2_TX_BUFFER_SIZE 64 // Tamaño del buffer de envío para UART2
+static volatile uint8_t uart2_tx_buffer[UART2_TX_BUFFER_SIZE];
+static volatile uint8_t tx2_head = 0;
+static volatile uint8_t tx2_tail = 0;
+// (Variables de RX de UART2 que ya añadimos)
 static volatile uint8_t uart2_rx_buffer[UART_RX_BUFFER_SIZE];
 static volatile uint8_t uart2_rx_index = 0;
 static volatile bool g_uart2_frame_received = false;
@@ -28,8 +34,11 @@ static volatile bool g_uart2_processing_lock = false;
 // Prototipo de la función que construye y envía una trama
 static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
 
+// Prototipo interno para UART2 
+static void UART2_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
+
 // Prototipo de la función que construye y envía una trama
-static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
+//static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len);
 
 #define UART_RESPONSE_BUFFER_SIZE 128
 //static char uart_response_buffer[UART_RESPONSE_BUFFER_SIZE];
@@ -77,6 +86,21 @@ void UART_Transmit_ISR(void) {
     }
 }
 
+//Implementación de UART2_Transmit_ISR 
+/**
+ * @brief Manejador de interrupción de transmisión para UART2.
+ * @details Envía el siguiente byte del búfer circular de UART2.
+ */
+void UART2_Transmit_ISR(void) {
+    if (tx2_head != tx2_tail) {
+        TXREG2 = uart2_tx_buffer[tx2_tail]; // Usa registro de UART2
+        tx2_tail = (tx2_tail + 1) % UART2_TX_BUFFER_SIZE; // Usa buffer de UART2
+    } else {
+        PIE3bits.TX2IE = 0; // Deshabilita interrupción TX de UART2
+    }
+}
+
+
 void UART1_SendString(const char *str) {
     while (*str) {
         uart_tx_buffer[tx_head] = *str++;
@@ -112,7 +136,9 @@ void UART_Send_Monitoring_Report(uint8_t portD, uint8_t portE, uint8_t portF, ui
     uint8_t payload[5];
     
     // Construir el byte de estado peatonal combinando los 4 bits inferiores de H y J
-    uint8_t pedestrian_status = (portH & 0x0F) | ((portJ & 0x0F) << 4);
+    //uint8_t pedestrian_status = (portH & 0x0F) | ((portJ & 0x0F) << 4);
+    // Dentro de la función UART_Send_Monitoring_Report
+    uint8_t pedestrian_status = (uint8_t)((portH & 0x0F) | ((portJ & 0x0F) << 4));
 
     payload[0] = EEPROM_ReadControllerID();
     payload[1] = portD;
@@ -158,6 +184,65 @@ static void UART_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len) {
     }
     PIE1bits.TX1IE = 1; // Habilitar interrupción de transmisión
 }
+
+
+// <<< --- INICIO DE LA MODIFICACIÓN --- >>>
+/**
+ * @brief Función interna para construir y encolar cualquier trama de respuesta por UART2.
+ */
+static void UART2_Send_Frame(uint8_t cmd, uint8_t* payload, uint8_t len) {
+    // Aseguramos que la trama quepa en el buffer
+    // (8 bytes de cabecera/cola + longitud)
+    if ((len + 8) > UART2_TX_BUFFER_SIZE) return; 
+
+    uint8_t frame_header_footer[8];
+    uint8_t frame_idx = 0;
+    uint8_t checksum = cmd + len;
+
+    // 1. Construir Encabezado, Comando y Longitud
+    frame_header_footer[frame_idx++] = 0x43;
+    frame_header_footer[frame_idx++] = 0x53;
+    frame_header_footer[frame_idx++] = 0x4F;
+    frame_header_footer[frame_idx++] = cmd;
+    frame_header_footer[frame_idx++] = len;
+
+    // 2. Calcular Checksum del Payload
+    for(uint8_t i = 0; i < len; i++) {
+        checksum += payload[i];
+    }
+
+    // 3. Construir Cola (Checksum y ETX)
+    frame_header_footer[frame_idx++] = checksum;
+    frame_header_footer[frame_idx++] = 0x03;
+    frame_header_footer[frame_idx++] = 0xFF;
+
+
+    // 4. --- LÓGICA CORREGIDA ---
+    // Deshabilitamos la interrupción de TX ANTES de tocar el buffer
+    PIE3bits.TX2IE = 0; 
+
+    // 4a. Añadir el encabezado (43 53 4F CMD LEN)
+    for(uint8_t i = 0; i < 5; i++) {
+        uart2_tx_buffer[tx2_head] = frame_header_footer[i];
+        tx2_head = (tx2_head + 1) % UART2_TX_BUFFER_SIZE;
+    }
+    
+    // 4b. Añadir el Payload
+    for(uint8_t i = 0; i < len; i++) {
+        uart2_tx_buffer[tx2_head] = payload[i];
+        tx2_head = (tx2_head + 1) % UART2_TX_BUFFER_SIZE;
+    }
+
+    // 4c. Añadir la cola (CHK 03 FF)
+    for(uint8_t i = 5; i < 8; i++) {
+        uart2_tx_buffer[tx2_head] = frame_header_footer[i];
+        tx2_head = (tx2_head + 1) % UART2_TX_BUFFER_SIZE;
+    }
+
+    // 5. Habilitamos la interrupción UNA SOLA VEZ al final.
+    PIE3bits.TX2IE = 1; 
+}
+// <<< --- FIN DE LA MODIFICACIÓN --- >>>
 
 // =============================================================================
 // >>> FUNCIÓN UART_Task MODIFICADA (Usa el cerrojo en lugar de deshabilitar la ISR) <<<
@@ -698,23 +783,48 @@ static void UART_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
 }
 
 
+// implementación de UART2_HandleCompleteFrame --- >>>
+/**
+ * @brief Procesa una trama completa recibida por UART2 (MMU).
+ */
 static void UART2_HandleCompleteFrame(uint8_t *buffer, uint8_t length) {
     uint8_t cmd = buffer[0];
     uint8_t len = buffer[1];
     
-    // (Podemos añadir validación de checksum si es necesario)
-    
-    char debug_msg[64];
-    sprintf(debug_msg, "UART2: Trama recibida! CMD=0x%02X, LEN=%d\r\n", cmd, len);
-    UART1_SendString(debug_msg);
+    // 1. Validar Checksum
+    uint8_t chk_calc = cmd + len;
+    for (uint8_t i = 0; i < len; i++) chk_calc += buffer[2 + i];
+    uint8_t chk_received = buffer[2 + len];
 
-    // Futura implementación:
-    // switch(cmd) {
-    //     case CMD_MMU_STATUS:
-    //         // ...
-    //         break;
-    //     case CMD_MMU_ERROR:
-    //         // ...
-    //         break;
-    // }
+    if (chk_calc != chk_received) {
+        // La trama está corrupta, la ignoramos.
+        return; 
+    }
+
+    // 2. Procesar Comandos de la MMU
+    switch(cmd) {
+        
+        case CMD_MMU_GET_CONFIG: // 0x01
+            if (len == 0) {
+                // El comando es correcto, preparamos la respuesta
+                uint8_t mask_v, mask_p;
+                EEPROM_ReadOutputMasks(&mask_v, &mask_p);
+                
+                uint8_t payload[2];
+                payload[0] = mask_v; // Máscara vehicular
+                payload[1] = mask_p; // Máscara peatonal
+                
+                // Responder por UART2
+                UART2_Send_Frame(RESP_MMU_CONFIG_DATA, payload, 2);
+            }
+            // (Si len != 0, ignoramos el comando malformado)
+            break;
+            
+        // ... Aquí se añadirán futuros comandos de la MMU ...
+            
+        default:
+            // Ignorar comandos desconocidos
+            break;
+    }
 }
+// <<< --- FIN DE LA MODIFICACIÓN --- >>>

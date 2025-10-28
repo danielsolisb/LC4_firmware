@@ -78,6 +78,7 @@ void main(void) {
     Sequence_Engine_Init();
     Scheduler_Init();
     UART1_Init(9600);
+    UART2_Init(9600);
     Timers_Init();
 
     if (EEPROM_Read(0x000) != 0xAA) {
@@ -98,6 +99,7 @@ void main(void) {
 
         if (!g_manual_flash_active) {
             UART_Task();
+            UART2_Task();
         }
 
         bool half_tick = g_half_second_flag;

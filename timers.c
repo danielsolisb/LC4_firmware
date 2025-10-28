@@ -100,6 +100,31 @@ void __interrupt() ISR(void) {
     if (PIE1bits.TX1IE && PIR1bits.TX1IF) {
         UART_Transmit_ISR();
     }
+    
+    // <<< --- INICIO DEL CÓDIGO NUEVO A AGREGAR --- >>>
+    // (Estos son los manejadores para el UART2 que faltaban)
+
+    // --- Manejador de Recepción UART2 (RX) ---
+    if (PIE3bits.RC2IE && PIR3bits.RC2IF) {
+
+        // Manejo de error de sobre-escritura (Overrun)
+        if(RCSTA2bits.OERR)
+        {
+            RCSTA2bits.CREN = 0;
+            RCSTA2bits.CREN = 1;
+        }
+
+        // Leer el dato y pasarlo a la tarea de procesamiento de UART2
+        uint8_t data = RCREG2;
+        UART2_ProcessReceivedByte(data);
+    }
+
+    // --- Manejador de Transmisión UART2 (TX) ---
+    if (PIE3bits.TX2IE && PIR3bits.TX2IF) {
+        // Llamamos a la nueva función de transmisión de UART2
+        UART2_Transmit_ISR();
+    }
+    // <<< --- FIN DEL CÓDIGO NUEVO --- >>>
 }
 
 // =============================================================================
